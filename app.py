@@ -1,49 +1,54 @@
+from pprint import pprint
 from urllib.error import HTTPError
 
 import pandas as pd
 import weaviate
-import weaviate.classes.config as wc
 from flask import Flask, request, jsonify
+from flask_cors import CORS
+from weaviate.collections.classes.config import Configure, VectorDistances, Property, DataType
+from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
 
 app = Flask(__name__)
+CORS(app)
 
 
 client = weaviate.connect_to_local(
     port=8080,
     grpc_port=50051,
     headers={
-        "X-PaLM-Api-Key": "ya29.a0AXooCgskXrcT2H-oiE22-TNJMZx6BgF0McidRb7hkS7_9vB3dpzggrDoL9QHrlUJmHCcoNrAZPHAFXgUsGDfZRMQ2FTRtz6SNhY_cS1KOMuwT5f3u7J3z6_4eND5B7rCuv0jv85YCDOhozRRoVoGvOAZ3BQjzrNw7EG373x3ofVQCcXYQMZcY2tv2U7njh8M2sp0Qwr5RIjoIZHylxVKapacYg7VJxnawqy6Q-69vo0NSw-c8L0Gx4qMIEhYuR0XRiQPsTKEzx4ksw9x8ZXMMrewWtrgCF56_akqCyxJxAbMalt192vQ1N9EXDFmcrX57qIYx1RuAfq_9jF3bcOdds2giwZsjMQh-3Rq22qZmNL-3_6poE0Cv2tMpLaLLCetWoBoIALJ4icnCnzKIcL7jabHBFVZewVbaCgYKAVQSARMSFQHGX2MiXE_Jb_cbG1Cm9YrPi9Pm9w0423",
+        "X-PaLM-Api-Key": "ya29.a0AXooCgsSGsw95XGMVIVP0nW8GzEy1_pg8l42kjGlzvC-odDl90-0SJF4MGTTYNd7z1aXf0rmzzQvkIq-W88TNeO16WJKZVxJQh51RorVgy5iNTfpLvFA9kEuNVO26It6Z7WOtqztPREXwtsbr81HusQmfp4-b-uUHSGWstHWdPfaNv7asoNlGktzFt_baNC9Ib8JLkP8CfjJQ7HpmohPlUT1cnG_9ucHEW-4KScaFubRTMIa1LQslXeTdKtYD9JhHXH_7tx4WBZ1yLTUlRE4oLF5ybFUOf931-C0WAfj5BZJ3JqKNAnUm-yRYzD0dIqGVFDYuVUk_80BOU4E80isKUWbGjrmZ5V-wwiJ9y_mATMMqbX_OFpbPZMpbhhz3Q_IDtzh10w6dCx3qBBCe12jUxKxwC21EgUaCgYKAc4SARMSFQHGX2MiYlkixGA5h5YXFaOQ3KPoTQ0422",
     }
 )
 
 try:
     url = 'https://raw.githubusercontent.com/IoanCosarca/Jeopardy-Dataset/main/jeopardy_questions.csv'
     df = pd.read_csv(url, sep=',', nrows=500)
-    print(df.head())
 
     df['value'] = df['value'].fillna(0)
     df['answer'] = df['answer'].astype(str)
-    print(df)
 
     client.collections.delete("JeopardyQuestion")
 
     client.collections.create(
         name="JeopardyQuestion",
+        vector_index_config=Configure.VectorIndex.hnsw(
+            distance_metric=VectorDistances.COSINE
+        ),
         properties=[
-            wc.Property(name="category", data_type=wc.DataType.TEXT),
-            wc.Property(name="question", data_type=wc.DataType.TEXT),
-            wc.Property(name="answer", data_type=wc.DataType.TEXT),
+            Property(name="category", data_type=DataType.TEXT),
+            Property(name="question", data_type=DataType.TEXT),
+            Property(name="answer", data_type=DataType.TEXT)
         ],
-        vectorizer_config=[
-            wc.Configure.NamedVectors.text2vec_palm(
-                name="category", source_properties=["category"], project_id="t-monument-297120"
-            ),
-            wc.Configure.NamedVectors.text2vec_palm(
-                name="question", source_properties=["question"], project_id="t-monument-297120"
-            )
-        ],
-        generative_config=wc.Configure.Generative.palm(project_id="t-monument-297120"),
+        vectorizer_config=Configure.Vectorizer.text2vec_palm(
+            model_id="textembedding-gecko@001",
+            vectorize_collection_name=False,
+            project_id="t-monument-297120"
+        ),
+        generative_config=Configure.Generative.palm(
+            temperature=0.25,
+            project_id="t-monument-297120"
+        ),
     )
 
     jeopardy = client.collections.get("JeopardyQuestion")
@@ -74,25 +79,30 @@ def ai_post():
     print("Post /ai called")
     json_content = request.json
     query = json_content.get("query")
-    print(f"query {query}")
+    print(f"query: {query}")
 
-    # Perform the query
     res = jeopardy.query.near_text(
         query=query,
-        target_vector="question",
-        limit=2
+        distance=0.33,
+        return_metadata=MetadataQuery(distance=True),
     )
+    for o in res.objects:
+        pprint(o.properties)
+        print(o.metadata.distance)
 
-    # Transform the result into a serializable format
-    response_data = []
-    for obj in res.objects:
-        response_data.append({
-            "category": obj.properties.get("category"),
-            "question": obj.properties.get("question"),
-            "answer": obj.properties.get("answer")
-        })
+    response_data = {
+        "query_response": ""
+    }
+    task = f"Provide a coherent single answer if {query} can be answered with these results or an apology stating simply you cannot answer the question based on current knowledge."
+    response = jeopardy.generate.near_text(
+        query=query,
+        limit=len(res.objects),
+        grouped_task=task,
+        grouped_properties=["category", "question", "answer"]
+    )
+    if response.generated:
+        response_data["query_response"] = response.generated
 
-    # Return the response as JSON
     return jsonify(response_data)
 
 
