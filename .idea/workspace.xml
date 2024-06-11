@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="145b4c81-cc7d-4a68-b6ec-96da78af39fe" name="Changes" comment="Integrated DBpedia searching for requests">
+    <list default="true" id="145b4c81-cc7d-4a68-b6ec-96da78af39fe" name="Changes" comment="Broken DBpedia search into two stages">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
     </list>
@@ -65,7 +65,7 @@
     &quot;Flask server.ChatBot-Backend.executor&quot;: &quot;Run&quot;,
     &quot;Flask server.Flask (app.py).executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;search-optimization&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;sparql-interogation-generation&quot;,
     &quot;last_opened_file_path&quot;: &quot;D:/Universitate/Licenta/ChatBot/ChatBot-Backend&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
@@ -144,6 +144,8 @@
       <workItem from="1717700844029" duration="41000" />
       <workItem from="1717772131981" duration="4321000" />
       <workItem from="1717936722898" duration="1621000" />
+      <workItem from="1718039414038" duration="908000" />
+      <workItem from="1718118294864" duration="1165000" />
     </task>
     <task id="LOCAL-00001" summary="Initial Commit">
       <option name="closed" value="true" />
@@ -190,10 +192,11 @@
     <MESSAGE value="Initial Commit" />
     <MESSAGE value="Initial Weaviate Configuration" />
     <MESSAGE value="Implemented answer generation and delivery to frontend" />
-    <option name="LAST_COMMIT_MESSAGE" value="Implemented answer generation and delivery to frontend" />
+    <MESSAGE value="Broken DBpedia search into two stages" />
+    <option name="LAST_COMMIT_MESSAGE" value="Broken DBpedia search into two stages" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/ChatBot_Backend$Flask__app_py_.coverage" NAME="Flask (app.py) Coverage Results" MODIFIED="1717940807085" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="D:\Universitate\Licenta\ChatBot\ChatBot-Backend" />
+    <SUITE FILE_PATH="coverage/ChatBot_Backend$Flask__app_py_.coverage" NAME="Flask (app.py) Coverage Results" MODIFIED="1718118746055" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="D:\Universitate\Licenta\ChatBot\ChatBot-Backend" />
     <SUITE FILE_PATH="coverage/ChatBot_Backend$ChatBot_Backend.coverage" NAME="ChatBot-Backend Coverage Results" MODIFIED="1716556975550" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>

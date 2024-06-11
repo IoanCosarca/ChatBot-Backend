@@ -19,7 +19,7 @@ CORS(app)
 sys.stdout.reconfigure(encoding='utf-8')
 nltk.download('wordnet')
 
-PALM_API_KEY = "ya29.a0AXooCgugn07zpeKm4mDWkdVZ-m335ousCLAyYQUSRHaEPs6gA7QBhH4VKZGkBSr0DKlHsqwvjy8NQfxik9CBCcwdFQdFGDOglE4LwnEiGCIDQmscSaD2OkpqO7i8FONWiMYGBIwSr6wnhnqP2OM4b3NAcnbbqGEbZOlHHiFqVp_q-hJk7EtwE98uQLsp-0ZeiWMWUaPHO3_mDlSJvn_vOpRsPwlYaWCb2-kmjIYD5bkLcKNBbTfSrQTbWPnjjgG6I7v0JWH7U9K3zHSwX3jVWZayVvNSoiX9P5TxjhoQ-oLHI-4mUu94qAdsy9bokzaRaOb_49zHQ9JDKNSOZBGhEfcINk2R46I2EXWVXnkm5N6Alu5Od2Q4vnLGK51kIel6Raj04eQSj1d-ieIlWWpZDnoUQvNQRWwoaCgYKAboSARMSFQHGX2MiFdyed0wjAHNIsDTVsk0lcw0423"
+PALM_API_KEY = "ya29.a0AXooCgvd7BTzm92wvlSO25OvrZ5bGKyMgDUKa8AEddfrYiqDdFCW0Guby3vhdx9xsvAuJ1x0NnurRlG-byHtGjlX9semcd3lHdaNXcov7UYrztwUn0rL0e6IuzTHj6n5wy7M4vXUaacAGE8EhMzaK6PhZ4ptJHcpwfo1xaaCKYNtzk_xozY_9u7tuP_yKrkdrpVUUG0WS0WLxflZFoNGuDzXEXzOEANDnqrVlomwumAonHh9Au2-cYosAoY1hJylzIZPRQC6wYGQKduVULpxoxDj5mnelsBNQMYN6WjMcYgXFtLUErv5s0391n3XtoMMlqHN0JPpJL1NglSqMRMcCtIJgl0AjbHixPmfx-Dh80zSzvxlXn0gPWU2sTm60O8hcC9GZRJeokptHiq5aEpQioIdgKLKLAFYaCgYKAT0SARMSFQHGX2MizfwFZKgZzAWDxeGvlz-Hfg0423"
 GOOGLE_API_KEY = "AIzaSyAJ6mi9i3I5qnEGgwJql4eJc6CZULfcYKU"
 
 llm = GoogleGenerativeAI(model="models/text-bison-001", google_api_key=GOOGLE_API_KEY)
@@ -37,7 +37,7 @@ client = weaviate.connect_to_local(
 )
 
 url = 'https://raw.githubusercontent.com/IoanCosarca/Jeopardy-Dataset/main/jeopardy_questions.csv'
-df = pd.read_csv(url, sep=',', nrows=500)
+df = pd.read_csv(url, sep=',', nrows=750)
 
 df['value'] = df['value'].fillna(0)
 df['answer'] = df['answer'].astype(str)
@@ -314,24 +314,26 @@ def ai_post():
         print(o.metadata.distance)
         sources.append(o.properties["abstract"])
 
-    dbpedia_task = (
-        f"Provide a coherent single answer if {query} can be answered with these results or an empty string if you"
-        f"cannot answer the question based on these."
-        f"Do not include any bullet points, special characters or additional formatting."
+    request_satisfied = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
+        f"Is the answer to {query} in {res.objects}? 'Yes' or 'No'"
     )
     dbpedia_response = ""
-    if res.objects:
-        try:
-            response = dbpedia.generate.near_text(
-                query=query,
-                limit=len(res.objects),
-                grouped_task=dbpedia_task
-            )
-            dbpedia_response = response.generated if response.generated else ""
-        except Exception as e:
-            print(f"Error during Initial DBpedia response generation: {e}")
-
-    if not dbpedia_response:
+    if request_satisfied == "Yes" or request_satisfied == "yes":
+        first_search_task = (
+            f"Provide a coherent single answer to {query} based on these results."
+            f"Do not include any bullet points, special characters or additional formatting."
+        )
+        if res.objects:
+            try:
+                response = dbpedia.generate.near_text(
+                    query=query,
+                    limit=len(res.objects),
+                    grouped_task=first_search_task
+                )
+                dbpedia_response = response.generated if response.generated else ""
+            except Exception as e:
+                print(f"Error during Initial DBpedia response generation: {e}")
+    else:
         print("========== Additional DBpedia Search ==========")
         additional_dbpedia_search(query)
 
@@ -346,12 +348,17 @@ def ai_post():
             print(o.metadata.distance)
             sources.append(o.properties["abstract"])
 
+        second_search_task = (
+            f"Provide a coherent single answer if {query} can be answered with these results or an empty string if you"
+            f"cannot answer the question based on these."
+            f"Do not include any bullet points, special characters or additional formatting."
+        )
         if res.objects:
             try:
                 response = dbpedia.generate.near_text(
                     query=query,
                     limit=len(res.objects),
-                    grouped_task=dbpedia_task
+                    grouped_task=second_search_task
                 )
                 dbpedia_response = response.generated if response.generated else ""
             except Exception as e:
