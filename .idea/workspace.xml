@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="145b4c81-cc7d-4a68-b6ec-96da78af39fe" name="Changes" comment="Broken DBpedia search into two stages">
+    <list default="true" id="145b4c81-cc7d-4a68-b6ec-96da78af39fe" name="Changes" comment="Fixed an error where additional search didn't execute">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
     </list>
@@ -146,6 +146,9 @@
       <workItem from="1717936722898" duration="1621000" />
       <workItem from="1718039414038" duration="908000" />
       <workItem from="1718118294864" duration="1165000" />
+      <workItem from="1718218343131" duration="110000" />
+      <workItem from="1718218463447" duration="9171000" />
+      <workItem from="1718309566366" duration="1416000" />
     </task>
     <task id="LOCAL-00001" summary="Initial Commit">
       <option name="closed" value="true" />
@@ -196,7 +199,7 @@
     <option name="LAST_COMMIT_MESSAGE" value="Broken DBpedia search into two stages" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/ChatBot_Backend$Flask__app_py_.coverage" NAME="Flask (app.py) Coverage Results" MODIFIED="1718118746055" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="D:\Universitate\Licenta\ChatBot\ChatBot-Backend" />
+    <SUITE FILE_PATH="coverage/ChatBot_Backend$Flask__app_py_.coverage" NAME="Flask (app.py) Coverage Results" MODIFIED="1718310952488" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="D:\Universitate\Licenta\ChatBot\ChatBot-Backend" />
     <SUITE FILE_PATH="coverage/ChatBot_Backend$ChatBot_Backend.coverage" NAME="ChatBot-Backend Coverage Results" MODIFIED="1716556975550" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>

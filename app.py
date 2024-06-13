@@ -19,7 +19,7 @@ CORS(app)
 sys.stdout.reconfigure(encoding='utf-8')
 nltk.download('wordnet')
 
-PALM_API_KEY = "ya29.a0AXooCgvd7BTzm92wvlSO25OvrZ5bGKyMgDUKa8AEddfrYiqDdFCW0Guby3vhdx9xsvAuJ1x0NnurRlG-byHtGjlX9semcd3lHdaNXcov7UYrztwUn0rL0e6IuzTHj6n5wy7M4vXUaacAGE8EhMzaK6PhZ4ptJHcpwfo1xaaCKYNtzk_xozY_9u7tuP_yKrkdrpVUUG0WS0WLxflZFoNGuDzXEXzOEANDnqrVlomwumAonHh9Au2-cYosAoY1hJylzIZPRQC6wYGQKduVULpxoxDj5mnelsBNQMYN6WjMcYgXFtLUErv5s0391n3XtoMMlqHN0JPpJL1NglSqMRMcCtIJgl0AjbHixPmfx-Dh80zSzvxlXn0gPWU2sTm60O8hcC9GZRJeokptHiq5aEpQioIdgKLKLAFYaCgYKAT0SARMSFQHGX2MizfwFZKgZzAWDxeGvlz-Hfg0423"
+PALM_API_KEY = "ya29.a0AXooCgvbVca03ppq2NRayueyv60leMSavP4e5e5OQyxKbSOczZ9n3UhN3Bq--GrK_rZTC2Wc2-FzUBiLq_aVPQdsFaifjylunL1Yza6_0O_93zA1iHfH7UUQEWnhT1i-DH18LXnmJOEXSTsCwvcEYg4PjSMn9o6cTvxe_FX4YKtFJUvdf74Kcm5nDqGynNJZxQdji8st8RXot1zYAPDfHjjZzwEJp_PRQFKBtn8GXUMdKFdYIF0bnqcim-36aypbA32ORpvXM6iM3XP7LZtJZRt26gaTYT8q6K0BZllHmCJhNSMCT4H2Vju1Jw539WASGvcPPftJf2DUP8pR4ubQWoolZW6epjFH-pa3u5DUlTsiox9i45_nokP6YZ5xNbidyPz0ecQh14zcwurid4hWmh0QeDuQJnaDaCgYKAdgSARMSFQHGX2Mi4GD_-bBx76UKUmhJN4dpUA0423"
 GOOGLE_API_KEY = "AIzaSyAJ6mi9i3I5qnEGgwJql4eJc6CZULfcYKU"
 
 llm = GoogleGenerativeAI(model="models/text-bison-001", google_api_key=GOOGLE_API_KEY)
@@ -257,8 +257,8 @@ def get_sources():
     return jsonify(sources)
 
 
-@app.route('/ai', methods=['POST'])
-def ai_post():
+@app.route('/ai/v1', methods=['POST'])
+def search_version_1():
     print("-------------------------------------------------")
     json_content = request.json
     query = json_content.get("query")
@@ -317,6 +317,7 @@ def ai_post():
     request_satisfied = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
         f"Is the answer to {query} in {res.objects}? 'Yes' or 'No'"
     )
+    print(request_satisfied)
     dbpedia_response = ""
     if request_satisfied == "Yes" or request_satisfied == "yes":
         first_search_task = (
@@ -390,6 +391,111 @@ def ai_post():
 
     response_data["query_response"] = combined_response
 
+    return jsonify(response_data)
+
+
+@app.route('/ai/v2', methods=['POST'])
+def search_version_2():
+    response_data = {
+        "query_response": "Coming soon..."
+    }
+    return jsonify(response_data)
+
+
+@app.route('/ai/v3/sparql', methods=['POST'])
+def generate_sparql_query():
+    json_content = request.json
+    query = json_content.get("query")
+    response_data = {
+        "query_response": ""
+    }
+
+    llm_prompt = (
+        f"Convert the following natural language question into a SPARQL query to interrogate DBpedia: '{query}'."
+        f"The query should retrieve all the abstracts related to the subject of '{query}'."
+        f"It's mandatory to assign the abstract with 'dbo:abstract ?abstract'."
+        f"Use FILTER to get only English results. Provide just the query text."
+        f"Here are some examples:\n"
+        f"\n"
+        f"Example 1:\n"
+        f"Question: 'What is the tallest mountain in Europe?'\n"
+        f"SPARQL Query:\n"
+        f"SELECT ?mountain ?abstract WHERE {{\n"
+        f"  ?mountain rdf:type dbo:Mountain ;\n"
+        f"            dbo:abstract ?abstract .\n"
+        f"  FILTER (lang(?abstract) = 'en')\n"
+        f"}}\n"
+        f"\n"
+        f"Example 2:\n"
+        f"Question: 'Who is the president of France?'\n"
+        f"SPARQL Query:\n"
+        f"SELECT ?person ?abstract WHERE {{\n"
+        f"  ?person rdf:type schema:Person ;\n"
+        f"          dbp:office dbr:President_of_France ;\n"
+        f"          dbo:abstract ?abstract .\n"
+        f"  FILTER (lang(?abstract) = 'en')\n"
+        f"}}\n"
+        f"\n"
+        f"Example 3:\n"
+        f"Question: 'What can you tell me about the Python programming language?'\n"
+        f"SPARQL Query:\n"
+        f"SELECT ?language ?abstract WHERE {{\n"
+        f"  ?language rdf:type dbo:ProgrammingLanguage ;\n"
+        f"            dbo:abstract ?abstract .\n"
+        f"  FILTER (lang(?abstract) = 'en')\n"
+        f"}}\n"
+        f"\n"
+        f"Example 4:\n"
+        f"Question: 'What are the main exports of Brazil?'\n"
+        f"SPARQL Query:\n"
+        f"SELECT ?export ?abstract WHERE {{\n"
+        f"  ?export dbo:wikiPageWikiLink dbr:Brazil ;"
+        f"          dbo:abstract ?abstract .\n"
+        f"  FILTER (lang(?abstract) = 'en')\n"
+        f"}}\n"
+        f"\n"
+        f"Example 5:\n"
+        f"Question: 'What are some notable works by William Shakespeare?'\n"
+        f"SPARQL Query:\n"
+        f"SELECT ?work ?abstract WHERE {{\n"
+        f"  ?work dbo:author dbr:William_Shakespeare ;\n"
+        f"        dbo:abstract ?abstract .\n"
+        f"  FILTER (lang(?abstract) = 'en')\n"
+        f"}}\n"
+        f"\n"
+        f"Example 6:\n"
+        f"Question: 'Which films were directed by Christopher Nolan?'\n"
+        f"SPARQL Query:\n"
+        f"SELECT ?film ?abstract WHERE {{\n"
+        f"  ?film dbo:director dbr:Christopher_Nolan ;\n"
+        f"        dbo:abstract ?abstract .\n"
+        f"  FILTER (lang(?abstract) = 'en')\n"
+        f"}}\n"
+        f"\n"
+        f"Example 7:\n"
+        f"Question: 'What are the notable inventions by Nikola Tesla?'\n"
+        f"SPARQL Query:\n"
+        f"SELECT ?invention ?abstract WHERE {{\n"
+        f"  ?invention dcterms:subject dbc:Inventions_by_Nikola_Tesla ;\n"
+        f"             dbo:abstract ?abstract .\n"
+        f"  FILTER (lang(?abstract) = 'en')\n"
+        f"}}\n"
+    )
+
+    sparql_query = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(llm_prompt)
+    print(sparql_query)
+    response_data["query_response"] = sparql_query
+    return jsonify(response_data)
+
+
+@app.route('/ai/v3/dbpedia', methods=['POST'])
+def search_with_generated_query():
+    json_content = request.json
+    sparql_query = json_content.get("query")
+    response_data = {
+        "query_response": ""
+    }
+    response_data["query_response"] = sparql_query
     return jsonify(response_data)
 
 
