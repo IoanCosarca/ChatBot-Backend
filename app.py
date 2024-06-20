@@ -1,6 +1,7 @@
 import sys
 from pprint import pprint
 
+import inflect
 import nltk
 import pandas as pd
 import weaviate
@@ -8,7 +9,6 @@ from SPARQLWrapper import SPARQLWrapper, JSON
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from langchain_google_genai import GoogleGenerativeAI
-from nltk.stem import WordNetLemmatizer
 from weaviate.collections.classes.config import Configure, VectorDistances, Property, DataType
 from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
@@ -19,7 +19,7 @@ CORS(app)
 sys.stdout.reconfigure(encoding='utf-8')
 nltk.download('wordnet')
 
-PALM_API_KEY = "ya29.a0AXooCgvbVca03ppq2NRayueyv60leMSavP4e5e5OQyxKbSOczZ9n3UhN3Bq--GrK_rZTC2Wc2-FzUBiLq_aVPQdsFaifjylunL1Yza6_0O_93zA1iHfH7UUQEWnhT1i-DH18LXnmJOEXSTsCwvcEYg4PjSMn9o6cTvxe_FX4YKtFJUvdf74Kcm5nDqGynNJZxQdji8st8RXot1zYAPDfHjjZzwEJp_PRQFKBtn8GXUMdKFdYIF0bnqcim-36aypbA32ORpvXM6iM3XP7LZtJZRt26gaTYT8q6K0BZllHmCJhNSMCT4H2Vju1Jw539WASGvcPPftJf2DUP8pR4ubQWoolZW6epjFH-pa3u5DUlTsiox9i45_nokP6YZ5xNbidyPz0ecQh14zcwurid4hWmh0QeDuQJnaDaCgYKAdgSARMSFQHGX2Mi4GD_-bBx76UKUmhJN4dpUA0423"
+PALM_API_KEY = "ya29.a0AXooCgvGzwl7lGq877tkJ_TthMoBybQzdqdB_EQdEuj14ydmDUnryEsEarBEZ6_eNrnzHTJ9eD_398OOEBpOzE7knNwvYzgNZ9_uLYNpM0HNGn3xgxhfthYFCbkMt6ae-guosjWuphUSb4s_UUgZTv6xumRF3ANgiN1jnQFeHgPYCzAIliru0eYnJ7M7s7bXWStwWLLIBGPvoSdJt031I14SxfgnKmxFWqy8bMOujHuKhav5Q7BlQF8gPUhZW_FMRXgNq3TbOM7b1kbYLrBjC74UTzoDHSW0gtYdgpGTedjcJDpTvoYdddvOjLvolsudDD_zvFmp2Ta3HO_Cknz1frkom3unaw85gABkbrwGkY9OYUIl7KRcSztwZfz4hMOZpVB-FN_dLlT9Gq5CeXF7vQSEQB-dme2_jzsaCgYKAdcSARMSFQHGX2MiiSX8675LsoZWy6nqCGuq4A0426"
 GOOGLE_API_KEY = "AIzaSyAJ6mi9i3I5qnEGgwJql4eJc6CZULfcYKU"
 
 llm = GoogleGenerativeAI(model="models/text-bison-001", google_api_key=GOOGLE_API_KEY)
@@ -103,29 +103,69 @@ client.collections.create(
 dbpedia = client.collections.get("DBpediaArticle")
 
 
-def capitalize_permutations(subject):
-    words = subject.split()
-    permutations = []
-    for i in range(1 << len(words)):
-        permutation = []
-        for j, word in enumerate(words):
-            if i & (1 << j):
-                permutation.append(word.capitalize())
+def create_subject_variants(subjects):
+    ie = inflect.engine()
+    subject_variants = set()
+
+    for subject in subjects:
+        subject = subject.strip()
+        capitalized_subject = ' '.join([word.capitalize() for word in subject.split()])
+        subject_singular = ie.singular_noun(capitalized_subject)
+        subject_plural = ie.plural_noun(capitalized_subject)
+
+        subject_variants.add(capitalized_subject)
+        if subject_singular:
+            subject_variants.add(subject_singular)
+        if subject_plural:
+            subject_variants.add(subject_plural)
+
+    return subject_variants
+
+
+def search_on_dbpedia_n_add_to_weaviate(subject_variants):
+    sparql = SPARQLWrapper("https://dbpedia.org/sparql")
+    sparql.setReturnFormat(JSON)
+
+    for variant in subject_variants:
+        sparql_query = f"""
+                SELECT ?entity ?abstract ?url WHERE {{
+                        ?entity rdfs:label '{variant}'@en ;
+                                dbo:abstract ?abstract ;
+                                foaf:isPrimaryTopicOf ?url .
+                        FILTER (lang(?abstract) = 'en')
+                }}
+                LIMIT 1
+            """
+        sparql.setQuery(sparql_query)
+
+        try:
+            results = sparql.query().convert()
+            if results["results"]["bindings"]:
+                result = results["results"]["bindings"][0]
+                abstract = result["abstract"]["value"]
+                # print(f"Abstract found for variant '{variant}': {abstract}")
+                article_object = {"abstract": abstract}
+                with client.batch.fixed_size(batch_size=200) as batch:
+                    batch.add_object(
+                        collection="DBpediaArticle",
+                        properties=article_object,
+                        uuid=generate_uuid5(result["url"]["value"])
+                    )
             else:
-                permutation.append(word)
-        permutations.append(" ".join(permutation))
-    return permutations
+                print(f"No abstract found for variant '{variant}'")
+        except Exception as e:
+            print(f"An error occurred while querying variant '{variant}': {e}")
 
 
 def initial_dbpedia_search(query):
-    lemmatizer = WordNetLemmatizer()
     subjects = set()
 
     try:
-        initial_subjects = llm.with_config(configurable={"llm_temperature": 0.5}).invoke(
-            f"Extract all subjects from the query '{query}'."
+        initial_subjects = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
+            f"For a given query, extract all subjects from it. "
             f"Put them in a comma-separated list where each subject is a name suitable for searching on Wikipedia. "
-            f"Do not include any bullet points, special characters, or additional formatting."
+            f"Do not include any bullet points, special characters, or additional formatting. "
+            f"The query is: '{query}'."
         )
         if not initial_subjects:
             raise ValueError("Empty response from LLM for subjects")
@@ -135,113 +175,34 @@ def initial_dbpedia_search(query):
         print(f"Error during LLM invocation: {e}")
         return ""
 
-    subject_variants = set()
-    for subject in subjects:
-        subject = subject.strip()
-        subject_singular = lemmatizer.lemmatize(subject)
-        subject_plural = lemmatizer.lemmatize(subject, 'n')
+    subject_variants = create_subject_variants(subjects)
+    print(subject_variants)
 
-        capitalized_subject_permutations = capitalize_permutations(subject)
-
-        subject_variants.update(capitalized_subject_permutations)
-        subject_variants.add(subject_singular)
-        subject_variants.add(subject_plural)
-
-    sparql = SPARQLWrapper("https://dbpedia.org/sparql")
-    sparql.setReturnFormat(JSON)
-
-    for variant in subject_variants:
-        sparql_query = f"""
-            SELECT ?abstract WHERE {{
-                ?entity rdfs:label "{variant}"@en ;
-                        dbo:abstract ?abstract .
-                FILTER (lang(?abstract) = 'en')
-            }}
-            LIMIT 1
-            """
-        sparql.setQuery(sparql_query)
-
-        try:
-            results = sparql.query().convert()
-            if results["results"]["bindings"]:
-                abstract = results["results"]["bindings"][0]["abstract"]["value"]
-                print(f"Abstract found for variant '{variant}': {abstract}")
-
-                article_object = {"abstract": abstract}
-                with client.batch.fixed_size(batch_size=200) as batch:
-                    batch.add_object(
-                        collection="DBpediaArticle",
-                        properties=article_object,
-                        uuid=generate_uuid5(article_object)
-                    )
-            else:
-                print(f"No abstract found for variant '{variant}'")
-        except Exception as e:
-            print(f"An error occurred while querying variant '{variant}': {e}")
+    search_on_dbpedia_n_add_to_weaviate(subject_variants)
 
 
 def additional_dbpedia_search(query):
-    lemmatizer = WordNetLemmatizer()
     subjects = set()
 
     try:
         associated_subjects = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
-            f"Extract relevant associated subjects to the query '{query}'."
+            f"For a given query, extract all relevant associated subjects to it. "
             f"Put them in a comma-separated list where each subject is a name suitable for searching on Wikipedia. "
-            f"Do not include any bullet points, special characters, or additional formatting."
+            f"Do not include any bullet points, special characters, or additional formatting. "
+            f"The query is: '{query}'."
         )
         if associated_subjects:
             for list_subjects in associated_subjects.split("\n"):
                 for s in list_subjects.split(", "):
                     subjects.add(s)
-            print(subjects)
     except Exception as e:
         print(f"Error during LLM invocation: {e}")
         return ""
 
-    subject_variants = set()
-    for subject in subjects:
-        subject = subject.strip()
-        subject_singular = lemmatizer.lemmatize(subject)
-        subject_plural = lemmatizer.lemmatize(subject, 'n')
+    subject_variants = create_subject_variants(subjects)
+    print(subject_variants)
 
-        capitalized_subject_permutations = capitalize_permutations(subject)
-
-        subject_variants.update(capitalized_subject_permutations)
-        subject_variants.add(subject_singular)
-        subject_variants.add(subject_plural)
-
-    sparql = SPARQLWrapper("https://dbpedia.org/sparql")
-    sparql.setReturnFormat(JSON)
-
-    for variant in subject_variants:
-        sparql_query = f"""
-            SELECT ?abstract WHERE {{
-                ?entity rdfs:label "{variant}"@en ;
-                        dbo:abstract ?abstract .
-                FILTER (lang(?abstract) = 'en')
-            }}
-            LIMIT 1
-            """
-        sparql.setQuery(sparql_query)
-
-        try:
-            results = sparql.query().convert()
-            if results["results"]["bindings"]:
-                abstract = results["results"]["bindings"][0]["abstract"]["value"]
-                print(f"Abstract found for variant '{variant}': {abstract}")
-
-                article_object = {"abstract": abstract}
-                with client.batch.fixed_size(batch_size=200) as batch:
-                    batch.add_object(
-                        collection="DBpediaArticle",
-                        properties=article_object,
-                        uuid=generate_uuid5(article_object)
-                    )
-            else:
-                print(f"No abstract found for variant '{variant}'")
-        except Exception as e:
-            print(f"An error occurred while querying variant '{variant}': {e}")
+    search_on_dbpedia_n_add_to_weaviate(subject_variants)
 
 
 sources = []
@@ -259,7 +220,7 @@ def get_sources():
 
 @app.route('/ai/v1', methods=['POST'])
 def search_version_1():
-    print("-------------------------------------------------")
+    print("---------- Search Version 1 ----------")
     json_content = request.json
     query = json_content.get("query")
     response_data = {
@@ -276,16 +237,13 @@ def search_version_1():
     for o in res.objects:
         pprint(o.properties)
         print(o.metadata.distance)
-        sources.append(f"Category: {o.properties['category']}\n"
-                       f"Question: {o.properties['question']}\n"
-                       f"Answer: {o.properties['answer']}"
-                       )
 
     jeopardy_task = (
-        f"Filter the following Jeopardy questions and answers to include only those that directly answer the query '{query}',"
-        f"then provide a coherent single answer if the query can be answered with these results"
-        f"or an empty string if the query cannot be answered based on these."
-        f"Do not include any bullet points, special characters, or additional formatting."
+        f"For a given query, filter these Jeopardy questions and answers to include only those that directly answer "
+        f"the query, then try to construct an answer using only these results. If you can do it, return it. If not, "
+        f"respond with ''. "
+        f"Do not include any bullet points, special characters, or additional formatting. "
+        f"The query is: '{query}'."
     )
     jeopardy_response = ""
     if res.objects:
@@ -297,6 +255,12 @@ def search_version_1():
                 grouped_properties=["category", "question", "answer"]
             )
             jeopardy_response = response.generated if response.generated else ""
+            for o in response.objects:
+                sources.append(
+                    f"Category: {o.properties['category']}\n"
+                    f"Question: {o.properties['question']}\n"
+                    f"Answer: {o.properties['answer']}"
+                )
         except Exception as e:
             print(f"Error during Jeopardy response generation: {e}")
 
@@ -306,13 +270,12 @@ def search_version_1():
     print("========== Results from Initial DBpedia Query ==========")
     res = dbpedia.query.near_text(
         query=query,
-        distance=0.4,
+        distance=0.34,
         return_metadata=MetadataQuery(distance=True)
     )
     for o in res.objects:
         pprint(o.properties)
         print(o.metadata.distance)
-        sources.append(o.properties["abstract"])
 
     request_satisfied = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
         f"Is the answer to {query} in {res.objects}? 'Yes' or 'No'"
@@ -321,8 +284,9 @@ def search_version_1():
     dbpedia_response = ""
     if request_satisfied == "Yes" or request_satisfied == "yes":
         first_search_task = (
-            f"Provide a coherent single answer to {query} based on these results."
-            f"Do not include any bullet points, special characters or additional formatting."
+            f"For the given query, provide a coherent single answer based on these results. "
+            f"Do not include any bullet points, special characters, or additional formatting. "
+            f"The query is: '{query}'."
         )
         if res.objects:
             try:
@@ -332,6 +296,8 @@ def search_version_1():
                     grouped_task=first_search_task
                 )
                 dbpedia_response = response.generated if response.generated else ""
+                for o in response.objects:
+                    sources.append(o.properties["abstract"])
             except Exception as e:
                 print(f"Error during Initial DBpedia response generation: {e}")
     else:
@@ -341,18 +307,18 @@ def search_version_1():
         print("========== Results from Additional DBpedia Query ==========")
         res = dbpedia.query.near_text(
             query=query,
-            distance=0.45,
+            distance=0.34,
             return_metadata=MetadataQuery(distance=True)
         )
         for o in res.objects:
             pprint(o.properties)
             print(o.metadata.distance)
-            sources.append(o.properties["abstract"])
 
         second_search_task = (
-            f"Provide a coherent single answer if {query} can be answered with these results or an empty string if you"
-            f"cannot answer the question based on these."
-            f"Do not include any bullet points, special characters or additional formatting."
+            f"For the given query, try to construct an answer using only these results. If you can do it, return it. "
+            f"If not, respond with ''. "
+            f"Do not include any bullet points, special characters, or additional formatting. "
+            f"The query is: '{query}'."
         )
         if res.objects:
             try:
@@ -362,6 +328,8 @@ def search_version_1():
                     grouped_task=second_search_task
                 )
                 dbpedia_response = response.generated if response.generated else ""
+                for o in response.objects:
+                    sources.append(o.properties["abstract"])
             except Exception as e:
                 print(f"Error during Additional DBpedia response generation: {e}")
 
@@ -370,10 +338,12 @@ def search_version_1():
 
     if jeopardy_response and dbpedia_response:
         combined_response = llm.invoke(
-            f"Combine the responses '{jeopardy_response}' and '{dbpedia_response}' to provide an answer to the query '{query}'."
-            f"Ensure the combined response satisfies the constraints of the query, such as the number of items requested."
-            f"Do not include any bullet points, special characters, or additional formatting."
-            f"If the query asks for a specific number of items, ensure the response contains exactly that number of items."
+            f"Construct an answer to the query by combining the jeopardy response and the dbpedia response. "
+            f"If the query asks for a specific number of items, ensure the response contains exactly that number of items. "
+            f"Do not include any bullet points, special characters, or additional formatting. "
+            f"The query is: '{query}'. "
+            f"The jeopardy response is: '{jeopardy_response}'. "
+            f"The dbpedia response is: '{dbpedia_response}'."
         )
     elif jeopardy_response:
         combined_response = jeopardy_response
@@ -382,12 +352,12 @@ def search_version_1():
     else:
         try:
             apology_message = llm.invoke(
-                "Apologize for not being able to provide an answer based on the current knowledge."
+                "Apologize in one sentence for not being able to provide an answer based on the current knowledge."
             )
-            combined_response = apology_message if apology_message else "An error occurred while processing your request."
+            combined_response = apology_message if apology_message else "An error occurred while apologizing."
         except Exception as e:
             print(f"Error during apology generation: {e}")
-            combined_response = "An error occurred while processing your request."
+            combined_response = "An error occurred while apologizing."
 
     response_data["query_response"] = combined_response
 
@@ -395,10 +365,169 @@ def search_version_1():
 
 
 @app.route('/ai/v2', methods=['POST'])
+# @retry(wait_fixed=2000, stop_max_attempt_number=3)
 def search_version_2():
+    print("---------- Search Version 2 ----------")
+    json_content = request.json
+    query = json_content.get("query")
     response_data = {
-        "query_response": "Coming soon..."
+        "query_response": ""
     }
+    sources.clear()
+
+    subjects = set()
+    try:
+        extracted_subjects = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
+            f"For a given query, extract all subjects and all associated subjects. "
+            f"Put them in a comma-separated list, where each subject is a name suitable for searching on Wikipedia. "
+            f"To this list, add the nouns in the query and the nouns associated the terms in the query. "
+            f"Do not include any bullet points, underscores, special characters, or additional formatting. "
+            f"The query is: '{query}'."
+        )
+        if not extracted_subjects:
+            raise ValueError("Empty response from LLM for subjects")
+        for s in extracted_subjects.split(", "):
+            subjects.add(s)
+    except Exception as e:
+        print(f"Error during LLM invocation: {e}")
+        return ""
+
+    subject_variants = create_subject_variants(subjects)
+    print(subject_variants)
+
+    sparql = SPARQLWrapper("https://dbpedia.org/sparql")
+    sparql.setReturnFormat(JSON)
+
+    with client.batch.fixed_size(batch_size=100) as batch:
+        for variant in subject_variants:
+            print(variant)
+            sparql_query_1 = f"""
+                SELECT ?entity ?abstract ?url WHERE {{
+                    ?entity rdfs:label '{variant}'@en ;
+                            dbo:abstract ?abstract ;
+                            foaf:isPrimaryTopicOf ?url .
+                    FILTER (lang(?abstract) = 'en')
+                }}
+            """
+            sparql.setQuery(sparql_query_1)
+            try:
+                results = sparql.query().convert()
+                for result in results["results"]["bindings"]:
+                    abstract = result["abstract"]["value"]
+                    article_object = {"abstract": abstract}
+                    batch.add_object(
+                        collection="DBpediaArticle",
+                        properties=article_object,
+                        uuid=generate_uuid5(result["url"]["value"])
+                    )
+            except Exception as e:
+                print(f"An error occurred while querying variant '{variant}': {e}")
+
+        variants_with_underscores = {variant.replace(" ", "_") for variant in subject_variants}
+        for variant in variants_with_underscores:
+            for term in subject_variants:
+                if variant.lower() != term.lower():
+                    print(variant + " " + term)
+                    sparql_query_2 = f"""
+                        SELECT ?entity ?abstract ?url WHERE {{
+                            ?entity rdf:type dbo:{variant} ;
+                                    dbo:abstract ?abstract ;
+                                    foaf:isPrimaryTopicOf ?url .
+                            FILTER (lang(?abstract) = 'en')
+                            FILTER (CONTAINS(?abstract, '{term}') = true)
+                        }}
+                    """
+                    sparql.setQuery(sparql_query_2)
+                    try:
+                        results = sparql.query().convert()
+                        for result in results["results"]["bindings"]:
+                            abstract = result["abstract"]["value"]
+                            article_object = {"abstract": abstract}
+                            batch.add_object(
+                                collection="DBpediaArticle",
+                                properties=article_object,
+                                uuid=generate_uuid5(result["url"]["value"])
+                            )
+                    except Exception as e:
+                        print(f"An error occurred while querying variant '{variant}': {e}")
+
+        variants_with_no_spaces = {variant.replace(" ", "") for variant in subject_variants}
+        for variant in variants_with_no_spaces:
+            for term in subject_variants:
+                if variant.lower() != term.lower():
+                    print(variant + " " + term)
+                    sparql_query_3 = f"""
+                        SELECT ?entity ?abstract ?url WHERE {{
+                            ?entity rdf:type schema:{variant} ;
+                                    dbo:abstract ?abstract ;
+                                    foaf:isPrimaryTopicOf ?url .
+                            FILTER (lang(?abstract) = 'en')
+                            FILTER (CONTAINS(?abstract, '{term}') = true)
+                        }}
+                    """
+                    sparql.setQuery(sparql_query_3)
+                    try:
+                        results = sparql.query().convert()
+                        for result in results["results"]["bindings"]:
+                            abstract = result["abstract"]["value"]
+                            article_object = {"abstract": abstract}
+                            batch.add_object(
+                                collection="DBpediaArticle",
+                                properties=article_object,
+                                uuid=generate_uuid5(result["url"]["value"])
+                            )
+                    except Exception as e:
+                        print(f"An error occurred while querying variant '{variant}': {e}")
+
+    total = dbpedia.aggregate.over_all(total_count=True)
+    print(total.total_count)
+
+    res = dbpedia.query.near_text(
+        query=query,
+        distance=0.34,
+        limit=35,
+        return_metadata=MetadataQuery(distance=True)
+    )
+    for o in res.objects:
+        pprint(o.properties)
+        print(o.metadata.distance)
+
+    dbpedia_response = ""
+    search_task = (
+        f"For the given query, try to construct an answer using only these results. If you can do it, return it. "
+        f"If not, respond with ''. "
+        f"Do not include any bullet points, special characters, or additional formatting. "
+        f"The query is: '{query}'."
+    )
+    if res.objects:
+        try:
+            response = dbpedia.generate.near_text(
+                query=query,
+                limit=len(res.objects),
+                grouped_task=search_task
+            )
+            dbpedia_response = response.generated if response.generated else ""
+            for o in response.objects:
+                sources.append(o.properties["abstract"])
+        except weaviate.exceptions.WeaviateQueryError as e:
+            print(f"Error during DBpedia response generation: {e.message}")
+
+    print("DBpedia response: " + dbpedia_response)
+    if dbpedia_response:
+        combined_response = dbpedia_response
+    else:
+        try:
+            apology_message = llm.invoke(
+                "Apologize in one sentence for not being able to provide an answer based on the current knowledge."
+            )
+            combined_response = apology_message if apology_message else "An error occurred while apologizing."
+        except Exception as e:
+            print(f"Error during apology generation: {e}")
+            combined_response = "An error occurred while apologizing."
+
+    response_data["query_response"] = combined_response
+    print(response_data["query_response"])
+
     return jsonify(response_data)
 
 
