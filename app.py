@@ -1,8 +1,8 @@
+import re
 import sys
 from pprint import pprint
 
 import inflect
-import nltk
 import pandas as pd
 import weaviate
 from SPARQLWrapper import SPARQLWrapper, JSON
@@ -17,9 +17,8 @@ app = Flask(__name__)
 CORS(app)
 
 sys.stdout.reconfigure(encoding='utf-8')
-nltk.download('wordnet')
 
-PALM_API_KEY = "ya29.a0AXooCgvGzwl7lGq877tkJ_TthMoBybQzdqdB_EQdEuj14ydmDUnryEsEarBEZ6_eNrnzHTJ9eD_398OOEBpOzE7knNwvYzgNZ9_uLYNpM0HNGn3xgxhfthYFCbkMt6ae-guosjWuphUSb4s_UUgZTv6xumRF3ANgiN1jnQFeHgPYCzAIliru0eYnJ7M7s7bXWStwWLLIBGPvoSdJt031I14SxfgnKmxFWqy8bMOujHuKhav5Q7BlQF8gPUhZW_FMRXgNq3TbOM7b1kbYLrBjC74UTzoDHSW0gtYdgpGTedjcJDpTvoYdddvOjLvolsudDD_zvFmp2Ta3HO_Cknz1frkom3unaw85gABkbrwGkY9OYUIl7KRcSztwZfz4hMOZpVB-FN_dLlT9Gq5CeXF7vQSEQB-dme2_jzsaCgYKAdcSARMSFQHGX2MiiSX8675LsoZWy6nqCGuq4A0426"
+PALM_API_KEY = "ya29.a0AXooCgvYBn8Is5MK3T7Vbf_yRiLAlH6L5Yz7gmbqsSj9AZwCzXK0ZUOTJP1DdKQ49EE3LgG1vxzkm2kNzsGg0Xie8tQdUXaDviN3ANwOgcmOui8Jwt0N3VnkxBabvzT2_VhcovN5WmhIiPTZbMenyvnj2UFpkft4tgYDj5z-Bb2eYQlQwKPuufCGD5e5F52N48zZ3c-y4Vwqcjd2cqbNKpkdk-S0PmCljITWA3XslM8pNRAflBagVUm88OrxIyq-JqD9p18MS2Xsj_T3vllo-48gmDMayfOnN6fRXVMAqZvjwru1WBotBFn9akNFa71xW3hW4JVWGiiwCNzzWsJup8CdUhkuG5dF37FryP0AH1P-I_r0a9SkFtbGAPDXsuNFPFEOXEeuh6lDK09FqOF4XYNjkWUfGIXWjwaCgYKAaASARMSFQHGX2Mi-2uH6y-ZyxLYEjJldkeekA0425"
 GOOGLE_API_KEY = "AIzaSyAJ6mi9i3I5qnEGgwJql4eJc6CZULfcYKU"
 
 llm = GoogleGenerativeAI(model="models/text-bison-001", google_api_key=GOOGLE_API_KEY)
@@ -101,41 +100,78 @@ client.collections.create(
 )
 
 dbpedia = client.collections.get("DBpediaArticle")
+sparql = SPARQLWrapper("https://dbpedia.org/sparql")
+sparql.setReturnFormat(JSON)
+
+print("Initializing")
+sparql_query = f"""
+    SELECT DISTINCT ?entity ?abstract ?url WHERE {{
+        ?entity rdf:type dbo:MilitaryConflict ;
+                dbo:date ?date ;
+                dbo:abstract ?abstract ;
+                foaf:isPrimaryTopicOf ?url .
+        FILTER (?date >= "1900-01-01"^^xsd:date && ?date <= "1999-12-31"^^xsd:date)
+        FILTER (lang(?abstract) = 'en')
+    }}
+"""
+sparql.setQuery(sparql_query)
+with client.batch.fixed_size(batch_size=100) as batch:
+    try:
+        initial_results = sparql.query().convert()
+        for r in initial_results["results"]["bindings"]:
+            a = r["abstract"]["value"]
+            a_obj = {"abstract": a}
+            batch.add_object(
+                collection="DBpediaArticle",
+                properties=a_obj,
+                uuid=generate_uuid5(r["url"]["value"])
+            )
+    except Exception as e:
+        print(f"An error occurred while querying DBpedia: {e}")
+
+total = dbpedia.aggregate.over_all(total_count=True)
+print(total.total_count)
 
 
 def create_subject_variants(subjects):
     ie = inflect.engine()
     subject_variants = set()
 
+    roman_numeral_pattern = re.compile(r'^(?=[MDCLXVI])M*(C[MD]|D?C{0,3})(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$',
+                                       re.IGNORECASE)
+
     for subject in subjects:
         subject = subject.strip()
-        capitalized_subject = ' '.join([word.capitalize() for word in subject.split()])
+        words = subject.split()
+
+        capitalized_words = []
+        for word in words:
+            if len(word) > 1 and roman_numeral_pattern.match(word):
+                capitalized_words.append(word.upper())
+            else:
+                capitalized_words.append(word.capitalize())
+
+        capitalized_subject = ' '.join(capitalized_words)
         subject_singular = ie.singular_noun(capitalized_subject)
-        subject_plural = ie.plural_noun(capitalized_subject)
 
         subject_variants.add(capitalized_subject)
         if subject_singular:
             subject_variants.add(subject_singular)
-        if subject_plural:
-            subject_variants.add(subject_plural)
 
     return subject_variants
 
 
 def search_on_dbpedia_n_add_to_weaviate(subject_variants):
-    sparql = SPARQLWrapper("https://dbpedia.org/sparql")
-    sparql.setReturnFormat(JSON)
-
     for variant in subject_variants:
         sparql_query = f"""
-                SELECT ?entity ?abstract ?url WHERE {{
-                        ?entity rdfs:label '{variant}'@en ;
-                                dbo:abstract ?abstract ;
-                                foaf:isPrimaryTopicOf ?url .
-                        FILTER (lang(?abstract) = 'en')
-                }}
-                LIMIT 1
-            """
+            SELECT ?entity ?abstract ?url WHERE {{
+                ?entity rdfs:label '{variant}'@en ;
+                        dbo:abstract ?abstract ;
+                        foaf:isPrimaryTopicOf ?url .
+                FILTER (lang(?abstract) = 'en')
+            }}
+            LIMIT 1
+        """
         sparql.setQuery(sparql_query)
 
         try:
@@ -145,7 +181,7 @@ def search_on_dbpedia_n_add_to_weaviate(subject_variants):
                 abstract = result["abstract"]["value"]
                 # print(f"Abstract found for variant '{variant}': {abstract}")
                 article_object = {"abstract": abstract}
-                with client.batch.fixed_size(batch_size=200) as batch:
+                with client.batch.fixed_size(batch_size=100) as batch:
                     batch.add_object(
                         collection="DBpediaArticle",
                         properties=article_object,
@@ -278,7 +314,7 @@ def search_version_1():
         print(o.metadata.distance)
 
     request_satisfied = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
-        f"Is the answer to {query} in {res.objects}? 'Yes' or 'No'"
+        f"Is the answer to {query} in {res.objects}? 'Yes' or 'No'."
     )
     print(request_satisfied)
     dbpedia_response = ""
@@ -395,10 +431,7 @@ def search_version_2():
     subject_variants = create_subject_variants(subjects)
     print(subject_variants)
 
-    sparql = SPARQLWrapper("https://dbpedia.org/sparql")
-    sparql.setReturnFormat(JSON)
-
-    with client.batch.fixed_size(batch_size=100) as batch:
+    with client.batch.fixed_size(batch_size=200) as batch:
         for variant in subject_variants:
             print(variant)
             sparql_query_1 = f"""
@@ -427,7 +460,7 @@ def search_version_2():
         for variant in variants_with_underscores:
             for term in subject_variants:
                 if variant.lower() != term.lower():
-                    print(variant + " " + term)
+                    print(variant + " " + str(term))
                     sparql_query_2 = f"""
                         SELECT ?entity ?abstract ?url WHERE {{
                             ?entity rdf:type dbo:{variant} ;
@@ -455,7 +488,7 @@ def search_version_2():
         for variant in variants_with_no_spaces:
             for term in subject_variants:
                 if variant.lower() != term.lower():
-                    print(variant + " " + term)
+                    print(variant + " " + str(term))
                     sparql_query_3 = f"""
                         SELECT ?entity ?abstract ?url WHERE {{
                             ?entity rdf:type schema:{variant} ;
@@ -485,7 +518,7 @@ def search_version_2():
     res = dbpedia.query.near_text(
         query=query,
         distance=0.34,
-        limit=35,
+        limit=30,
         return_metadata=MetadataQuery(distance=True)
     )
     for o in res.objects:
