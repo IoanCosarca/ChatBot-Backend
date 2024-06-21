@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="145b4c81-cc7d-4a68-b6ec-96da78af39fe" name="Changes" comment="Added sparql query generation functionality">
+    <list default="true" id="145b4c81-cc7d-4a68-b6ec-96da78af39fe" name="Changes" comment="Implemented the 2nd search version, along with optimizations">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
     </list>
@@ -65,7 +65,7 @@
     &quot;Flask server.ChatBot-Backend.executor&quot;: &quot;Run&quot;,
     &quot;Flask server.Flask (app.py).executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;broader-search&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;initial-weaviate-articles&quot;,
     &quot;last_opened_file_path&quot;: &quot;D:/Universitate/Licenta/ChatBot/ChatBot-Backend&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
@@ -103,6 +103,7 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Flask server.Flask (app.py)" />
         <item itemvalue="Flask server.Flask (app.py)" />
         <item itemvalue="Flask server.Flask (app.py)" />
       </list>
@@ -159,7 +160,8 @@
       <workItem from="1718789554929" duration="18646000" />
       <workItem from="1718870662344" duration="11114000" />
       <workItem from="1718887248927" duration="2454000" />
-      <workItem from="1718889925122" duration="16765000" />
+      <workItem from="1718889925122" duration="21486000" />
+      <workItem from="1718953252346" duration="2708000" />
     </task>
     <task id="LOCAL-00001" summary="Initial Commit">
       <option name="closed" value="true" />
@@ -193,7 +195,15 @@
       <option name="project" value="LOCAL" />
       <updated>1718311221089</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="Implemented the 2nd search version, along with optimizations">
+      <option name="closed" value="true" />
+      <created>1718916285751</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1718916285751</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -216,10 +226,11 @@
     <MESSAGE value="Implemented answer generation and delivery to frontend" />
     <MESSAGE value="Broken DBpedia search into two stages" />
     <MESSAGE value="Added sparql query generation functionality" />
-    <option name="LAST_COMMIT_MESSAGE" value="Added sparql query generation functionality" />
+    <MESSAGE value="Implemented the 2nd search version, along with optimizations" />
+    <option name="LAST_COMMIT_MESSAGE" value="Implemented the 2nd search version, along with optimizations" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/ChatBot_Backend$Flask__app_py_.coverage" NAME="Flask (app.py) Coverage Results" MODIFIED="1718915979591" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="D:\Universitate\Licenta\ChatBot\ChatBot-Backend" />
+    <SUITE FILE_PATH="coverage/ChatBot_Backend$Flask__app_py_.coverage" NAME="Flask (app.py) Coverage Results" MODIFIED="1718955517576" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="D:\Universitate\Licenta\ChatBot\ChatBot-Backend" />
     <SUITE FILE_PATH="coverage/ChatBot_Backend$ChatBot_Backend.coverage" NAME="ChatBot-Backend Coverage Results" MODIFIED="1716556975550" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>
