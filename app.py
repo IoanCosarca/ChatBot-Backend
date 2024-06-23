@@ -18,7 +18,7 @@ CORS(app)
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-PALM_API_KEY = "ya29.a0AXooCgvYBn8Is5MK3T7Vbf_yRiLAlH6L5Yz7gmbqsSj9AZwCzXK0ZUOTJP1DdKQ49EE3LgG1vxzkm2kNzsGg0Xie8tQdUXaDviN3ANwOgcmOui8Jwt0N3VnkxBabvzT2_VhcovN5WmhIiPTZbMenyvnj2UFpkft4tgYDj5z-Bb2eYQlQwKPuufCGD5e5F52N48zZ3c-y4Vwqcjd2cqbNKpkdk-S0PmCljITWA3XslM8pNRAflBagVUm88OrxIyq-JqD9p18MS2Xsj_T3vllo-48gmDMayfOnN6fRXVMAqZvjwru1WBotBFn9akNFa71xW3hW4JVWGiiwCNzzWsJup8CdUhkuG5dF37FryP0AH1P-I_r0a9SkFtbGAPDXsuNFPFEOXEeuh6lDK09FqOF4XYNjkWUfGIXWjwaCgYKAaASARMSFQHGX2Mi-2uH6y-ZyxLYEjJldkeekA0425"
+PALM_API_KEY = "ya29.a0AXooCguw-1Xcp2cb-PzQc6Y5Ah5YWrAYHEYvYU0Tet3DmOVgOhjGCETgE9jet-zyXB7nR0gzsNFWJ59ddsiwJf2f4DG8MaleIceEoH1spXw-xjI65lVc_a7KiIgXbbgX99RoSOWoGQjNJrRGiAW-xXlv0c87A8JrhVgKq2e9n_D0b9ZoQXbWe8PJkoBaV5JQ21Ag9Q0cj0BjDnxvH4NY0ojRv_8IvqOcoWS3cbSlVoK-MvHC7u1DqhNaRZbl8wQM3mwQongaoQZymBmMaB4j520AvEhfyq5P2cplknCSk6COFkSnxsRqnIdfeCopBjReVm3QuM34WhNfrNl8lbgdwMTThl3sVCMrlDlnw8CZLbNfH0qeJy7US9U_M-xCmC4bz0UF--BG1cAAJ0f5NxNnm9iLjLIqQIbP_z0aCgYKARQSARMSFQHGX2MiT1gD72UG5NRq4f0IrV_5cQ0426"
 GOOGLE_API_KEY = "AIzaSyAJ6mi9i3I5qnEGgwJql4eJc6CZULfcYKU"
 
 llm = GoogleGenerativeAI(model="models/text-bison-001", google_api_key=GOOGLE_API_KEY)
@@ -41,8 +41,7 @@ df = pd.read_csv(url, sep=',', nrows=750)
 df['value'] = df['value'].fillna(0)
 df['answer'] = df['answer'].astype(str)
 
-client.collections.delete("JeopardyQuestion")
-client.collections.delete("DBpediaArticle")
+client.collections.delete_all()
 
 client.collections.create(
     name="JeopardyQuestion",
@@ -111,11 +110,12 @@ sparql_query = f"""
                 dbo:abstract ?abstract ;
                 foaf:isPrimaryTopicOf ?url .
         FILTER (?date >= "1900-01-01"^^xsd:date && ?date <= "1999-12-31"^^xsd:date)
+        FILTER (CONTAINS(?abstract, 'Europe') = true)
         FILTER (lang(?abstract) = 'en')
     }}
 """
 sparql.setQuery(sparql_query)
-with client.batch.fixed_size(batch_size=100) as batch:
+with client.batch.fixed_size(batch_size=200) as batch:
     try:
         initial_results = sparql.query().convert()
         for r in initial_results["results"]["bindings"]:
@@ -571,94 +571,134 @@ def generate_sparql_query():
     response_data = {
         "query_response": ""
     }
+    sources.clear()
 
     llm_prompt = (
-        f"Convert the following natural language question into a SPARQL query to interrogate DBpedia: '{query}'."
-        f"The query should retrieve all the abstracts related to the subject of '{query}'."
-        f"It's mandatory to assign the abstract with 'dbo:abstract ?abstract'."
-        f"Use FILTER to get only English results. Provide just the query text."
-        f"Here are some examples:\n"
-        f"\n"
+        f"For a given query, create a sparql interrogation that retrieves all the abstracts related to the most "
+        f"comprehensive subject/noun of the query. "
+        f"It's mandatory to assign abstract with 'dbo:abstract ?abstract' and url with 'foaf:isPrimaryTopicOf ?url'. "
+        f"Use FILTER to get only English results. Use another filter to search for a specific term in ?abstract. "
         f"Example 1:\n"
         f"Question: 'What is the tallest mountain in Europe?'\n"
-        f"SPARQL Query:\n"
-        f"SELECT ?mountain ?abstract WHERE {{\n"
-        f"  ?mountain rdf:type dbo:Mountain ;\n"
-        f"            dbo:abstract ?abstract .\n"
+        f"SELECT DISTINCT ?abstract ?url WHERE {{\n"
+        f"  ?e rdf:type dbo:Mountain ;\n"
+        f"            dbo:abstract ?abstract ;\n"
+        f"            foaf:isPrimaryTopicOf ?url .\n"
+        f"  FILTER (CONTAINS(?abstract, 'Europe') = true)\n"
         f"  FILTER (lang(?abstract) = 'en')\n"
         f"}}\n"
-        f"\n"
         f"Example 2:\n"
-        f"Question: 'Who is the president of France?'\n"
-        f"SPARQL Query:\n"
-        f"SELECT ?person ?abstract WHERE {{\n"
-        f"  ?person rdf:type schema:Person ;\n"
-        f"          dbp:office dbr:President_of_France ;\n"
-        f"          dbo:abstract ?abstract .\n"
-        f"  FILTER (lang(?abstract) = 'en')\n"
-        f"}}\n"
-        f"\n"
-        f"Example 3:\n"
         f"Question: 'What can you tell me about the Python programming language?'\n"
-        f"SPARQL Query:\n"
-        f"SELECT ?language ?abstract WHERE {{\n"
-        f"  ?language rdf:type dbo:ProgrammingLanguage ;\n"
-        f"            dbo:abstract ?abstract .\n"
+        f"SELECT DISTINCT ?abstract ?url WHERE {{\n"
+        f"  ?e rdf:type dbo:ProgrammingLanguage ;\n"
+        f"            dbo:abstract ?abstract ;\n"
+        f"            foaf:isPrimaryTopicOf ?url .\n"
+        f"  FILTER (CONTAINS(?abstract, 'Python') = true)\n"
         f"  FILTER (lang(?abstract) = 'en')\n"
         f"}}\n"
-        f"\n"
-        f"Example 4:\n"
-        f"Question: 'What are the main exports of Brazil?'\n"
-        f"SPARQL Query:\n"
-        f"SELECT ?export ?abstract WHERE {{\n"
-        f"  ?export dbo:wikiPageWikiLink dbr:Brazil ;"
-        f"          dbo:abstract ?abstract .\n"
-        f"  FILTER (lang(?abstract) = 'en')\n"
-        f"}}\n"
-        f"\n"
-        f"Example 5:\n"
-        f"Question: 'What are some notable works by William Shakespeare?'\n"
-        f"SPARQL Query:\n"
-        f"SELECT ?work ?abstract WHERE {{\n"
-        f"  ?work dbo:author dbr:William_Shakespeare ;\n"
-        f"        dbo:abstract ?abstract .\n"
-        f"  FILTER (lang(?abstract) = 'en')\n"
-        f"}}\n"
-        f"\n"
-        f"Example 6:\n"
-        f"Question: 'Which films were directed by Christopher Nolan?'\n"
-        f"SPARQL Query:\n"
-        f"SELECT ?film ?abstract WHERE {{\n"
-        f"  ?film dbo:director dbr:Christopher_Nolan ;\n"
-        f"        dbo:abstract ?abstract .\n"
-        f"  FILTER (lang(?abstract) = 'en')\n"
-        f"}}\n"
-        f"\n"
-        f"Example 7:\n"
-        f"Question: 'What are the notable inventions by Nikola Tesla?'\n"
-        f"SPARQL Query:\n"
-        f"SELECT ?invention ?abstract WHERE {{\n"
-        f"  ?invention dcterms:subject dbc:Inventions_by_Nikola_Tesla ;\n"
-        f"             dbo:abstract ?abstract .\n"
-        f"  FILTER (lang(?abstract) = 'en')\n"
-        f"}}\n"
+        f"Keep the interrogation simple, with as few properties/tags as possible. "
+        f"The query is: '{query}'."
     )
 
     sparql_query = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(llm_prompt)
-    print(sparql_query)
     response_data["query_response"] = sparql_query
     return jsonify(response_data)
+
+
+def clean_sparql_query(query):
+    query = query.strip()
+    while not query.lower().startswith("select"):
+        query = query[1:].strip()
+
+    # Ensure the query ends with "}" or a number (for "LIMIT number")
+    while not (query.endswith("}") or re.search(r"\d+$", query)):
+        query = query[:-1].strip()
+
+    return query
 
 
 @app.route('/ai/v3/dbpedia', methods=['POST'])
 def search_with_generated_query():
     json_content = request.json
-    sparql_query = json_content.get("query")
+    query = json_content.get("query")
+    sparql_query = json_content.get("generated_sparql")
     response_data = {
         "query_response": ""
     }
-    response_data["query_response"] = sparql_query
-    return jsonify(response_data)
+
+    sparql_query = clean_sparql_query(sparql_query)
+    print(sparql_query)
+    sparql.setQuery(sparql_query)
+
+    try:
+        results = sparql.query().convert()
+        if results["results"]["bindings"]:
+            with client.batch.fixed_size(batch_size=200) as batch:
+                for result in results["results"]["bindings"]:
+                    abstract = result["abstract"]["value"]
+                    article_object = {"abstract": abstract}
+                    batch.add_object(
+                        collection="DBpediaArticle",
+                        properties=article_object,
+                        uuid=generate_uuid5(result["url"]["value"])
+                    )
+            total = dbpedia.aggregate.over_all(total_count=True)
+            print(total.total_count)
+
+            res = dbpedia.query.near_text(
+                query=query,
+                distance=0.30,
+                limit=10,
+                return_metadata=MetadataQuery(distance=True)
+            )
+            for o in res.objects:
+                pprint(o.properties)
+                print(o.metadata.distance)
+
+            dbpedia_response = ""
+            search_task = (
+                f"For the given query, try to construct an answer using only these results. If you can do it, return it. "
+                f"If not, respond with ''. "
+                f"Do not include any bullet points, special characters, or additional formatting. "
+                f"The query is: '{query}'."
+            )
+            if res.objects:
+                try:
+                    response = dbpedia.generate.near_text(
+                        query=query,
+                        limit=len(res.objects),
+                        grouped_task=search_task
+                    )
+                    dbpedia_response = response.generated if response.generated else ""
+                    for o in response.objects:
+                        sources.append(o.properties["abstract"])
+                except weaviate.exceptions.WeaviateQueryError as e:
+                    print(f"Error during DBpedia response generation: {e.message}")
+
+            print("DBpedia response: " + dbpedia_response)
+            if dbpedia_response:
+                combined_response = dbpedia_response
+            else:
+                try:
+                    apology_message = llm.invoke(
+                        "Apologize in one sentence for not being able to provide an answer based on the current knowledge."
+                    )
+                    combined_response = apology_message if apology_message else "An error occurred while apologizing."
+                except Exception as e:
+                    print(f"Error during apology generation: {e}")
+                    combined_response = "An error occurred while apologizing."
+
+            response_data["query_response"] = combined_response
+            print(response_data["query_response"])
+        else:
+            response_data["query_response"] = "No results found! The query was incorrect."
+            return jsonify(response_data), 500
+
+        return jsonify(response_data), 200
+    except Exception as e:
+        print(e)
+        response_data["query_response"] = "The generated query was bad or lacking."
+        return jsonify(response_data), 500
 
 
 if __name__ == '__main__':
