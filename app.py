@@ -9,6 +9,7 @@ from SPARQLWrapper import SPARQLWrapper, JSON
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from langchain_google_genai import GoogleGenerativeAI
+from retrying import retry
 from weaviate.collections.classes.config import Configure, VectorDistances, Property, DataType
 from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
@@ -18,30 +19,27 @@ CORS(app)
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-PALM_API_KEY = "ya29.a0AXooCguw-1Xcp2cb-PzQc6Y5Ah5YWrAYHEYvYU0Tet3DmOVgOhjGCETgE9jet-zyXB7nR0gzsNFWJ59ddsiwJf2f4DG8MaleIceEoH1spXw-xjI65lVc_a7KiIgXbbgX99RoSOWoGQjNJrRGiAW-xXlv0c87A8JrhVgKq2e9n_D0b9ZoQXbWe8PJkoBaV5JQ21Ag9Q0cj0BjDnxvH4NY0ojRv_8IvqOcoWS3cbSlVoK-MvHC7u1DqhNaRZbl8wQM3mwQongaoQZymBmMaB4j520AvEhfyq5P2cplknCSk6COFkSnxsRqnIdfeCopBjReVm3QuM34WhNfrNl8lbgdwMTThl3sVCMrlDlnw8CZLbNfH0qeJy7US9U_M-xCmC4bz0UF--BG1cAAJ0f5NxNnm9iLjLIqQIbP_z0aCgYKARQSARMSFQHGX2MiT1gD72UG5NRq4f0IrV_5cQ0426"
+PALM_API_KEY = "ya29.a0AXooCgvrJXKONOU9MP0o8HQUOgQapipCT1KrevzzrDMbsHU5EyFUXdkiR1Hp4LyO_ju37ESmARECJOFc68DvTuuuhP5PP0kqOpZT5xwA-jVvQFr13fp7E8ce4keISZZcprR5GZHlVB1nmi8TQjTdMc8Z0jv_KH-2aS0wyqSSsIe_BocizwkC3NBsBdbEg7EjNWUbLIcVfupojhmkHYVdND8gSzQt4sA18eKOmX2_jL5C55A9uohhQmkntpgIuUhP54kpxh79p2OnhODbDIzWe8u8x3ufylkIm5M2mbEXNDS9h5pG1xSxWg_8pVpDXZ9tjBy5ffJepE7LCobaNZMy-drmZHlf9ZErXwc8mhcLUx-CrTwX5UCAjoVloGR1i5KuIuoE7R-Xkaka8Z9jQ5RmOU7XOVRm0gQSsDEaCgYKASkSARMSFQHGX2Miv8YdEwJUnW4Cwc-pcnUwIA0426"
 GOOGLE_API_KEY = "AIzaSyAJ6mi9i3I5qnEGgwJql4eJc6CZULfcYKU"
 
 llm = GoogleGenerativeAI(model="models/text-bison-001", google_api_key=GOOGLE_API_KEY)
-# model = new GoogleVertexAI({
-#   model: "code-bison",
-#   maxOutputTokens: 2048,
-# });
 
 client = weaviate.connect_to_local(
+    host="localhost",
     port=8080,
     grpc_port=50051,
     headers={
         "X-PaLM-Api-Key": PALM_API_KEY
-    }
+    },
+    skip_init_checks=True
 )
+print("Weaviate client connected")
 
 url = 'https://raw.githubusercontent.com/IoanCosarca/Jeopardy-Dataset/main/jeopardy_questions.csv'
-df = pd.read_csv(url, sep=',', nrows=750)
+df = pd.read_csv(url, sep=',', nrows=1000)
 
-df['value'] = df['value'].fillna(0)
-df['answer'] = df['answer'].astype(str)
-
-client.collections.delete_all()
+client.collections.delete("JeopardyQuestion")
+client.collections.delete("DBpediaArticle")
 
 client.collections.create(
     name="JeopardyQuestion",
@@ -66,7 +64,7 @@ client.collections.create(
 
 jeopardy = client.collections.get("JeopardyQuestion")
 
-with client.batch.fixed_size(batch_size=200) as batch:
+with client.batch.fixed_size(batch_size=100) as batch:
     for _, row in df.iterrows():
         question_object = {
             "category": row['category'],
@@ -78,6 +76,7 @@ with client.batch.fixed_size(batch_size=200) as batch:
             properties=question_object,
             uuid=generate_uuid5(question_object)
         )
+print("Added questions to DB")
 
 client.collections.create(
     name="DBpediaArticle",
@@ -99,11 +98,12 @@ client.collections.create(
 )
 
 dbpedia = client.collections.get("DBpediaArticle")
+
 sparql = SPARQLWrapper("https://dbpedia.org/sparql")
 sparql.setReturnFormat(JSON)
 
-print("Initializing")
-sparql_query = f"""
+print("Initializing sparql")
+sparql_interrogation = f"""
     SELECT DISTINCT ?entity ?abstract ?url WHERE {{
         ?entity rdf:type dbo:MilitaryConflict ;
                 dbo:date ?date ;
@@ -114,23 +114,27 @@ sparql_query = f"""
         FILTER (lang(?abstract) = 'en')
     }}
 """
-sparql.setQuery(sparql_query)
-with client.batch.fixed_size(batch_size=200) as batch:
-    try:
-        initial_results = sparql.query().convert()
-        for r in initial_results["results"]["bindings"]:
-            a = r["abstract"]["value"]
-            a_obj = {"abstract": a}
-            batch.add_object(
-                collection="DBpediaArticle",
-                properties=a_obj,
-                uuid=generate_uuid5(r["url"]["value"])
-            )
-    except Exception as e:
-        print(f"An error occurred while querying DBpedia: {e}")
+sparql.setQuery(sparql_interrogation)
 
-total = dbpedia.aggregate.over_all(total_count=True)
-print(total.total_count)
+try:
+    with client.batch.fixed_size(batch_size=100) as b:
+        initial_results = sparql.query().convert()
+        if initial_results["results"]["bindings"]:
+            for r in initial_results["results"]["bindings"]:
+                a = r["abstract"]["value"]
+                a_obj = {"abstract": a}
+                b.add_object(
+                    collection="DBpediaArticle",
+                    properties=a_obj,
+                    uuid=generate_uuid5(r["url"]["value"])
+                )
+        else:
+            print(f"No abstract found for initial sparql query.")
+except Exception as exception:
+    print(f"An error occurred while querying DBpedia: {exception}")
+
+no_articles = dbpedia.aggregate.over_all(total_count=True)
+print(no_articles.total_count)
 
 
 def create_subject_variants(subjects):
@@ -162,35 +166,32 @@ def create_subject_variants(subjects):
 
 
 def search_on_dbpedia_n_add_to_weaviate(subject_variants):
-    for variant in subject_variants:
-        sparql_query = f"""
-            SELECT ?entity ?abstract ?url WHERE {{
-                ?entity rdfs:label '{variant}'@en ;
-                        dbo:abstract ?abstract ;
-                        foaf:isPrimaryTopicOf ?url .
-                FILTER (lang(?abstract) = 'en')
-            }}
-            LIMIT 1
-        """
-        sparql.setQuery(sparql_query)
+    with client.batch.fixed_size(batch_size=100) as batch_search_1:
+        for variant in subject_variants:
+            print(variant)
+            sparql_query = f"""
+                SELECT ?entity ?abstract ?url WHERE {{
+                    ?entity rdfs:label '{variant}'@en ;
+                            dbo:abstract ?abstract ;
+                            foaf:isPrimaryTopicOf ?url .
+                    FILTER (lang(?abstract) = 'en')
+                }}
+                LIMIT 1
+            """
+            sparql.setQuery(sparql_query)
 
-        try:
-            results = sparql.query().convert()
-            if results["results"]["bindings"]:
-                result = results["results"]["bindings"][0]
-                abstract = result["abstract"]["value"]
-                # print(f"Abstract found for variant '{variant}': {abstract}")
-                article_object = {"abstract": abstract}
-                with client.batch.fixed_size(batch_size=100) as batch:
-                    batch.add_object(
+            try:
+                results = sparql.query().convert()
+                for result in results["results"]["bindings"]:
+                    article = result["abstract"]["value"]
+                    article_object = {"abstract": article}
+                    batch_search_1.add_object(
                         collection="DBpediaArticle",
                         properties=article_object,
                         uuid=generate_uuid5(result["url"]["value"])
                     )
-            else:
-                print(f"No abstract found for variant '{variant}'")
-        except Exception as e:
-            print(f"An error occurred while querying variant '{variant}': {e}")
+            except Exception as e:
+                print(f"An error occurred while querying variant '{variant}': {e}")
 
 
 def initial_dbpedia_search(query):
@@ -242,6 +243,7 @@ def additional_dbpedia_search(query):
 
 
 sources = []
+apology_prompt = "Apologize in one sentence for not being able to provide an answer based on what you found."
 
 
 @app.route('/')
@@ -260,7 +262,8 @@ def search_version_1():
     json_content = request.json
     query = json_content.get("query")
     response_data = {
-        "query_response": ""
+        "query_response": "",
+        "status": 0
     }
     sources.clear()
 
@@ -275,9 +278,9 @@ def search_version_1():
         print(o.metadata.distance)
 
     jeopardy_task = (
-        f"For a given query, filter these Jeopardy questions and answers to include only those that directly answer "
-        f"the query, then try to construct an answer using only these results. If you can do it, return it. If not, "
-        f"respond with ''. "
+        f"For a given query, filter these Jeopardy questions and answers to include only those related to the query, "
+        f"then try to construct an answer using only the words from these results. If you can do it, return it. "
+        f"If not, respond with ''. "
         f"Do not include any bullet points, special characters, or additional formatting. "
         f"The query is: '{query}'."
     )
@@ -320,7 +323,7 @@ def search_version_1():
     dbpedia_response = ""
     if request_satisfied == "Yes" or request_satisfied == "yes":
         first_search_task = (
-            f"For the given query, provide a coherent single answer based on these results. "
+            f"For the given query, construct an answer using the words from these abstracts. "
             f"Do not include any bullet points, special characters, or additional formatting. "
             f"The query is: '{query}'."
         )
@@ -351,8 +354,9 @@ def search_version_1():
             print(o.metadata.distance)
 
         second_search_task = (
-            f"For the given query, try to construct an answer using only these results. If you can do it, return it. "
-            f"If not, respond with ''. "
+            f"For the given query, try to construct an answer using only the words from these abstracts. Compare "
+            f"every abstract to the query and group them to try and answer. If you can do it, return it. If not, "
+            f"respond with ''. "
             f"Do not include any bullet points, special characters, or additional formatting. "
             f"The query is: '{query}'."
         )
@@ -374,8 +378,8 @@ def search_version_1():
 
     if jeopardy_response and dbpedia_response:
         combined_response = llm.invoke(
-            f"Construct an answer to the query by combining the jeopardy response and the dbpedia response. "
-            f"If the query asks for a specific number of items, ensure the response contains exactly that number of items. "
+            f"Construct a short answer to the query by combining the jeopardy response and the dbpedia response. "
+            f"If the query asks for a certain number of items, ensure the response contains only that number. "
             f"Do not include any bullet points, special characters, or additional formatting. "
             f"The query is: '{query}'. "
             f"The jeopardy response is: '{jeopardy_response}'. "
@@ -386,28 +390,26 @@ def search_version_1():
     elif dbpedia_response:
         combined_response = dbpedia_response
     else:
-        try:
-            apology_message = llm.invoke(
-                "Apologize in one sentence for not being able to provide an answer based on the current knowledge."
-            )
-            combined_response = apology_message if apology_message else "An error occurred while apologizing."
-        except Exception as e:
-            print(f"Error during apology generation: {e}")
-            combined_response = "An error occurred while apologizing."
+        print("Here")
+        apology = llm.invoke(apology_prompt)
+        response_data["query_response"] = apology if apology else "An error occurred while apologizing."
+        response_data["status"] = 500
+        return jsonify(response_data)
 
     response_data["query_response"] = combined_response
-
+    response_data["status"] = 200
     return jsonify(response_data)
 
 
 @app.route('/ai/v2', methods=['POST'])
-# @retry(wait_fixed=2000, stop_max_attempt_number=3)
+@retry(wait_fixed=2000, stop_max_attempt_number=3)
 def search_version_2():
     print("---------- Search Version 2 ----------")
     json_content = request.json
     query = json_content.get("query")
     response_data = {
-        "query_response": ""
+        "query_response": "",
+        "status": 0
     }
     sources.clear()
 
@@ -431,7 +433,7 @@ def search_version_2():
     subject_variants = create_subject_variants(subjects)
     print(subject_variants)
 
-    with client.batch.fixed_size(batch_size=200) as batch:
+    with client.batch.fixed_size(batch_size=100) as batch_search_2:
         for variant in subject_variants:
             print(variant)
             sparql_query_1 = f"""
@@ -448,7 +450,7 @@ def search_version_2():
                 for result in results["results"]["bindings"]:
                     abstract = result["abstract"]["value"]
                     article_object = {"abstract": abstract}
-                    batch.add_object(
+                    batch_search_2.add_object(
                         collection="DBpediaArticle",
                         properties=article_object,
                         uuid=generate_uuid5(result["url"]["value"])
@@ -476,7 +478,7 @@ def search_version_2():
                         for result in results["results"]["bindings"]:
                             abstract = result["abstract"]["value"]
                             article_object = {"abstract": abstract}
-                            batch.add_object(
+                            batch_search_2.add_object(
                                 collection="DBpediaArticle",
                                 properties=article_object,
                                 uuid=generate_uuid5(result["url"]["value"])
@@ -504,7 +506,7 @@ def search_version_2():
                         for result in results["results"]["bindings"]:
                             abstract = result["abstract"]["value"]
                             article_object = {"abstract": abstract}
-                            batch.add_object(
+                            batch_search_2.add_object(
                                 collection="DBpediaArticle",
                                 properties=article_object,
                                 uuid=generate_uuid5(result["url"]["value"])
@@ -527,39 +529,39 @@ def search_version_2():
 
     dbpedia_response = ""
     search_task = (
-        f"For the given query, try to construct an answer using only these results. If you can do it, return it. "
+        f"For the given query, try to construct an answer using only the words from these abstracts. Compare every "
+        f"abstract to the query and group them to try and answer. If you can do it, return it. "
         f"If not, respond with ''. "
         f"Do not include any bullet points, special characters, or additional formatting. "
         f"The query is: '{query}'."
     )
     if res.objects:
-        try:
-            response = dbpedia.generate.near_text(
-                query=query,
-                limit=len(res.objects),
-                grouped_task=search_task
-            )
-            dbpedia_response = response.generated if response.generated else ""
-            for o in response.objects:
-                sources.append(o.properties["abstract"])
-        except weaviate.exceptions.WeaviateQueryError as e:
-            print(f"Error during DBpedia response generation: {e.message}")
+        response = dbpedia.generate.near_text(
+            query=query,
+            limit=len(res.objects),
+            grouped_task=search_task
+        )
+        dbpedia_response = response.generated if response.generated else ""
+        for o in response.objects:
+            sources.append(o.properties["abstract"])
 
     print("DBpedia response: " + dbpedia_response)
     if dbpedia_response:
         combined_response = dbpedia_response
     else:
         try:
-            apology_message = llm.invoke(
-                "Apologize in one sentence for not being able to provide an answer based on the current knowledge."
-            )
-            combined_response = apology_message if apology_message else "An error occurred while apologizing."
+            apology = llm.invoke(apology_prompt)
+            response_data["query_response"] = apology if apology else "An error occurred while apologizing."
+            response_data["status"] = 500
+            return jsonify(response_data)
         except Exception as e:
             print(f"Error during apology generation: {e}")
-            combined_response = "An error occurred while apologizing."
+            response_data["query_response"] = "An error occurred while apologizing."
+            response_data["status"] = 500
+            return jsonify(response_data)
 
     response_data["query_response"] = combined_response
-    print(response_data["query_response"])
+    response_data["status"] = 200
 
     return jsonify(response_data)
 
@@ -573,7 +575,7 @@ def generate_sparql_query():
     }
     sources.clear()
 
-    llm_prompt = (
+    prompt = (
         f"For a given query, create a sparql interrogation that retrieves all the abstracts related to the most "
         f"comprehensive subject/noun of the query. "
         f"It's mandatory to assign abstract with 'dbo:abstract ?abstract' and url with 'foaf:isPrimaryTopicOf ?url'. "
@@ -600,7 +602,7 @@ def generate_sparql_query():
         f"The query is: '{query}'."
     )
 
-    sparql_query = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(llm_prompt)
+    sparql_query = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(prompt)
     response_data["query_response"] = sparql_query
     return jsonify(response_data)
 
@@ -623,7 +625,8 @@ def search_with_generated_query():
     query = json_content.get("query")
     sparql_query = json_content.get("generated_sparql")
     response_data = {
-        "query_response": ""
+        "query_response": "",
+        "status": 0
     }
 
     sparql_query = clean_sparql_query(sparql_query)
@@ -633,11 +636,11 @@ def search_with_generated_query():
     try:
         results = sparql.query().convert()
         if results["results"]["bindings"]:
-            with client.batch.fixed_size(batch_size=200) as batch:
+            with client.batch.fixed_size(batch_size=100) as batch_search_3:
                 for result in results["results"]["bindings"]:
                     abstract = result["abstract"]["value"]
                     article_object = {"abstract": abstract}
-                    batch.add_object(
+                    batch_search_3.add_object(
                         collection="DBpediaArticle",
                         properties=article_object,
                         uuid=generate_uuid5(result["url"]["value"])
@@ -657,8 +660,8 @@ def search_with_generated_query():
 
             dbpedia_response = ""
             search_task = (
-                f"For the given query, try to construct an answer using only these results. If you can do it, return it. "
-                f"If not, respond with ''. "
+                f"For the given query, try to construct an answer using only these results. If you can do it, "
+                f"return it. If not, respond with ''. "
                 f"Do not include any bullet points, special characters, or additional formatting. "
                 f"The query is: '{query}'."
             )
@@ -680,26 +683,30 @@ def search_with_generated_query():
                 combined_response = dbpedia_response
             else:
                 try:
-                    apology_message = llm.invoke(
-                        "Apologize in one sentence for not being able to provide an answer based on the current knowledge."
-                    )
-                    combined_response = apology_message if apology_message else "An error occurred while apologizing."
+                    apology = llm.invoke(apology_prompt)
+                    response_data["query_response"] = apology if apology else "An error occurred while apologizing."
+                    response_data["status"] = 500
+                    return jsonify(response_data)
                 except Exception as e:
                     print(f"Error during apology generation: {e}")
                     combined_response = "An error occurred while apologizing."
 
             response_data["query_response"] = combined_response
+            response_data["status"] = 200
             print(response_data["query_response"])
         else:
             response_data["query_response"] = "No results found! The query was incorrect."
-            return jsonify(response_data), 500
+            response_data["status"] = 500
+            return jsonify(response_data)
 
-        return jsonify(response_data), 200
+        print("Success")
+        return jsonify(response_data)
     except Exception as e:
         print(e)
         response_data["query_response"] = "The generated query was bad or lacking."
-        return jsonify(response_data), 500
+        response_data["status"] = 500
+        return jsonify(response_data)
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=False)
