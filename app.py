@@ -7,14 +7,14 @@ from pprint import pprint
 import inflect
 import pandas as pd
 import requests
+import vertexai
 import weaviate
 from SPARQLWrapper import SPARQLWrapper, JSON
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from langchain_core.prompts import PromptTemplate
-from langchain_google_genai import GoogleGenerativeAI
 from retrying import retry
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from vertexai.generative_models import GenerativeModel
+from vertexai.language_models import ChatModel, TextGenerationModel
 from weaviate.collections.classes.config import Configure, VectorDistances, Property, DataType
 from weaviate.collections.classes.config_vectorizers import Multi2VecField
 from weaviate.collections.classes.grpc import MetadataQuery
@@ -25,12 +25,12 @@ CORS(app)
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-PALM_API_KEY = "ya29.a0AXooCgsreoYlJYOqLq4_u7y4claIgp4Oc2xz4ofl1V8na-ojxcHtrsGd6tldMjMdvl284aIeAwyz-aJqKu1UzkxouNH6CWDB_V7cC03qqVT752RuMSRgp3tOG3ZXtMGivGhrM4-4HnUiQEvHSkJI9rjDwjxbdjdk9rm0biaJ1M2YcrwuPOGzuNBovsAXXXoIqbKRYF1BNLovm0CM0eLs0tYYjhuf-iFtDiX6lYHGVyEb38wuA44A2p_WFlvqNuyBTU2MPxyOS4exZb5yuTpabaKhmtQTsyy_iQBSunnsvp8-g0EmpRfv3XLYUt01Uei4HVDQiwndysW1HeO6oSezdzu1hPX2AbPgQXPtqqYO8SFOdrxN-bLb9ur2CYREdDXRt4wGbC9aBdGcEwSqiumF95AdgdpDZPcTdFwaCgYKAeMSARMSFQHGX2MiEeO4ndO56z846QGtHAzZrw0426"
-GOOGLE_API_KEY = "AIzaSyAJ6mi9i3I5qnEGgwJql4eJc6CZULfcYKU"
-# HF_ACCESS_TOKEN = "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"
+PALM_API_KEY = "ya29.a0AXooCgtSfB1vjugt4vB6110ztf0BLWPqvdzvXdxGHXFf4g6PVq4fTascyB3xByHOMt5EkJPnvDnDTOmwyL2UavfuA_-h59GVLdhol6j7fD0mZOFbn_LGmnRXUFwUIrNUjPp6f_mMV77TYnjaT_PZOEa_-SLDNtTAmoli5ro19_lWeNGu5nOqvUff9d1EYUXcwv3eKJfIKPImmddnTeErVTKXgyTjkOVaw3oNrEO7pd0hC2qn4ABemBgh7wsoTB62OP0VqA7qxgfAxcctWHY3_djm2lSnY9cnIeKNRr70OJRbMuXOpOWTyrG-NWAXUWq_TrQwDaeMb9zeS0CU7UKUhsnZ1_s4ZJFKBuDfjmcDuzPFr3SkJ9HTLy4uFKazwDjNf-IsPXdheeQQ8yAPsPnHzXbnTXO9T0GgiFoaCgYKAYcSARMSFQHGX2MiTGLld-wWM5M1xFAfhgVIzg0426"
 
-llm = GoogleGenerativeAI(model="models/text-bison-001", google_api_key=GOOGLE_API_KEY)
-# Palm 2 Chat Bison
+vertexai.init(project="t-monument-297120", location="us-central1")
+chat_model = ChatModel.from_pretrained("chat-bison-32k@002")
+text_model = TextGenerationModel.from_pretrained("text-bison@001")
+gemini_model = GenerativeModel("gemini-1.0-pro-002")
 
 client = weaviate.connect_to_local(
     host="localhost",
@@ -122,11 +122,12 @@ client.collections.create(
     ],
     vectorizer_config=Configure.Vectorizer.text2vec_palm(
         project_id="t-monument-297120",
-        model_id="textembedding-gecko@003",
+        model_id="textembedding-gecko@001",
         vectorize_collection_name=False
     ),
     generative_config=Configure.Generative.palm(
         project_id="t-monument-297120",
+        model_id="gemini-1.0-pro-002",
         temperature=0.25
     )
 )
@@ -248,6 +249,7 @@ def add_images_to_weaviate(objects):
             for future in futures:
                 future.result()
 
+
 def fetch_and_encode_and_add(image_url, source, current_batch):
     encoded_image = fetch_and_encode_image(image_url)
     if encoded_image:
@@ -308,11 +310,13 @@ def initial_dbpedia_search(query):
     subjects = set()
 
     try:
-        initial_subjects = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
-            f"For a given query, extract all subjects (max 10 subjects) and put them in a comma-separated list. "
-            f"Do not include any bullet points, special characters, or additional formatting. "
+        prompt = (
+            f"For the given query, extract all subjects from it (up to 5 subjects), each suitable for Wikipedia "
+            f"search. Output the subjects in a comma-separated format, with no additional text, bullet points, or "
+            f"special characters. "
             f"The query is: '{query}'."
         )
+        initial_subjects = text_model.predict(prompt, temperature=0.0, max_output_tokens=1024).text
         if not initial_subjects:
             raise ValueError("Empty response from LLM for subjects")
         for s in initial_subjects.split(", "):
@@ -331,12 +335,13 @@ def additional_dbpedia_search(query):
     subjects = set()
 
     try:
-        associated_subjects = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
-            f"For a given query, extract all relevant associated subjects (max 10 subjects) and put them in a "
-            f"comma-separated list. "
-            f"Do not include any bullet points, special characters, or additional formatting. "
+        prompt = (
+            f"For a given query, extract up to 5 relevant associated subjects, each suitable for Wikipedia search. "
+            f"Output the subjects in a comma-separated format, with no additional text, bullet points, or special "
+            f"characters. "
             f"The query is: '{query}'."
         )
+        associated_subjects = text_model.predict(prompt, temperature=0.0, max_output_tokens=1024).text
         if associated_subjects:
             for list_subjects in associated_subjects.split("\n"):
                 for s in list_subjects.split(", "):
@@ -355,6 +360,17 @@ sources = []
 apology_prompt = "Apologize in one sentence for not being able to provide an answer based on what you found."
 
 
+def get_text_based_on_model(model_name, prompt, temperature=0.0):
+    text = ""
+    if model_name == "chat-bison":
+        text = chat_model.start_chat().send_message(prompt, temperature=temperature, max_output_tokens=1024).text
+    if model_name == "text-bison":
+        text = text_model.predict(prompt, temperature=temperature, max_output_tokens=1024).text
+    if model_name == "gemini":
+        text = gemini_model.generate_content(prompt).text
+    return text
+
+
 @app.route('/')
 def hello_world():  # put application's code here
     return 'Hello World!'
@@ -367,16 +383,18 @@ def get_sources():
 
 @app.route('/ai/image', methods=["GET"])
 def search_image():
-    retrieved_response = request.args.get('retrieved_response')
-    subject_for_image = llm.with_config(configurable={"llm_temperature": 1.0}).invoke(
-        f"From the generated answer, extract the main subject or if it's a list of subjects, extract one and return "
-        f"what you have extracted. If there is no subject or the answer is an apology, return 'No'. "
+    retrieved_response = request.args.get('query')
+    model_name = request.args.get('model')
+    prompt = (
+        f"From the generated answer, extract the main subject/one of the subjects (if there are more than one) and "
+        f"return it. If there is no subject or the answer is an apology, return 'No'. "
         f"The generated answer is: '{retrieved_response}'."
     )
+    subject_for_image = get_text_based_on_model(model_name, prompt, 1.0)
 
     words = subject_for_image.split()
     subject_for_image = ' '.join(word.capitalize() for word in words)
-    print(subject_for_image)
+    print("Subject for image: " + subject_for_image)
     if subject_for_image != "No":
         response = images.query.near_text(
             query=subject_for_image,
@@ -400,8 +418,8 @@ def search_image():
 
 def construct_search_task_string(query):
     search_task = (
-        f"For the given query, compare every abstract to the query and group them to try to answer. If you can do it, "
-        f"return it. If not, return an empty string ''. "
+        f"For the given query, use these obtained abstracts and try to answer to the query only if the words from "
+        f"them provide the answer. If you can do it, return the answer. If not, just return ''. "
         f"The query is: '{query}'."
     )
     return search_task
@@ -413,6 +431,7 @@ def search_version_1():
     print("---------- Search Version 1 ----------")
     json_content = request.json
     query = json_content.get("query")
+    model_name = json_content.get("model")
     response_data = {
         "query_response": "",
         "status": 0
@@ -428,7 +447,7 @@ def search_version_1():
     jeopardy_task = (
         f"From the obtained triplets of category-question-answer, if the words from a triplet can answer the query, "
         f"construct a response using just those words. "
-        f"If not, respond with an empty string ''. "
+        f"If not, just return ''. "
         f"The query is: '{query}'."
     )
     jeopardy_response = ""
@@ -464,6 +483,7 @@ def search_version_1():
         limit=10
     )
     first_response = ""
+    aux_sources = []
     if res.objects:
         response = dbpedia.generate.near_text(
             query=query,
@@ -475,16 +495,19 @@ def search_version_1():
         for o in response.objects:
             pprint(o.properties)
             print(o.metadata.distance)
-            sources.append(o.properties["abstract"])
+            aux_sources.append(o.properties["abstract"])
         first_response = response.generated
         add_images_to_weaviate(response.objects)
 
-    request_satisfied = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
-        f"Is the answer to {query} in {first_response}? 'Yes' or 'No'."
+    prompt = (
+        f"Is the answer to {query} in {first_response}? Respond just with 'Yes' or 'No'."
     )
+    request_satisfied = get_text_based_on_model(model_name, prompt, 1.0)
     print(request_satisfied)
-    dbpedia_response = ""
+    dbpedia_response = ''
     if request_satisfied == "Yes" or request_satisfied == "yes":
+        for source in aux_sources:
+            sources.append(source)
         dbpedia_response = first_response if first_response else ""
     else:
         print("========== Additional DBpedia Search ==========")
@@ -516,19 +539,23 @@ def search_version_1():
     print("DBpedia Response: " + dbpedia_response)
 
     if jeopardy_response and dbpedia_response:
-        combined_response = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
-            f"Combine jeopardy response and dbpedia response to provide a single answer for the query. "
+        print("We got here")
+        prompt = (
+            f"Combine jeopardy response and dbpedia response to provide a single answer for the query if the words in "
+            f"them actually provide the answer and are not an apology. If that's not the case, apologize for not being "
+            f"able to respond. "
             f"If the query asks for a certain number of items, ensure the response contains only that number. "
             f"The query is: '{query}'. "
             f"The jeopardy response is: '{jeopardy_response}'. "
             f"The dbpedia response is: '{dbpedia_response}'."
         )
+        combined_response = get_text_based_on_model(model_name, prompt, 0.0)
     elif jeopardy_response:
         combined_response = jeopardy_response
     elif dbpedia_response:
         combined_response = dbpedia_response
     else:
-        apology = llm.invoke(apology_prompt)
+        apology = gemini_model.generate_content(apology_prompt).text
         response_data["query_response"] = apology if apology else "An error occurred while apologizing."
         response_data["status"] = 500
         return jsonify(response_data)
@@ -553,12 +580,17 @@ def search_version_2():
 
     subjects = set()
     try:
-        extracted_subjects = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(
-            f"For a given query, extract the subjects and put them in a comma-separated list. To that list, add 5 "
-            f"associated subjects, the nouns in the query and 5 associated nouns to the terms in the query. "
-            f"Do not include any bullet points, underscores, special characters, or additional formatting. "
+        prompt = (
+            f"For the given query, follow these steps:\n"
+            f"1. Extract all the subjects from the query, each suitable for Wikipedia search.\n"
+            f"2. Add 3 associated subjects that are relevant to the query, each suitable for Wikipedia search.\n"
+            f"3. Extract all nouns from the query.\n"
+            f"4. Add 3 associated nouns that are relevant to the query.\n"
+            f"Take 15 subjects and nouns in total and output them in a comma-separated format, with no additional "
+            f"text, bullet points, or special characters.\n"
             f"The query is: '{query}'."
         )
+        extracted_subjects = text_model.predict(prompt, temperature=0.0, max_output_tokens=1024).text
         if not extracted_subjects:
             raise ValueError("Empty response from LLM for subjects")
         for s in extracted_subjects.split(", "):
@@ -674,7 +706,7 @@ def search_version_2():
     if dbpedia_response:
         combined_response = dbpedia_response
     else:
-        apology = llm.invoke(apology_prompt)
+        apology = gemini_model.generate_content(apology_prompt).text
         response_data["query_response"] = apology if apology else "An error occurred while apologizing."
         response_data["status"] = 500
         return jsonify(response_data)
@@ -685,18 +717,66 @@ def search_version_2():
     return jsonify(response_data)
 
 
+def verify_generated_interrogation(generated_interrogation):
+    if generated_interrogation.find("?abstract") == -1:
+        return False
+    if generated_interrogation.find("?thumbnail") == -1:
+        return False
+    if generated_interrogation.find("?image_list") == -1:
+        return False
+    if generated_interrogation.find("?url") == -1:
+        return False
+    if generated_interrogation.find("(GROUP_CONCAT(?images; separator=', ') AS ?image_list)") == -1:
+        return False
+    if generated_interrogation.find("dbo:abstract ?abstract") == -1:
+        return False
+    if generated_interrogation.find("dbo:thumbnail ?thumbnail") == -1:
+        return False
+    if generated_interrogation.find("foaf:depiction ?images") == -1:
+        return False
+    if generated_interrogation.find("foaf:isPrimaryTopicOf ?url") == -1:
+        return False
+    return True
+
+
+def clean_sparql_query(query):
+    query = query.strip()
+    while not query.lower().startswith("select"):
+        query = query[1:].strip()
+
+    # Ensure the query ends with "}" or a number (for "LIMIT number")
+    while not (query.endswith("}") or re.search(r"\d+$", query)):
+        query = query[:-1].strip()
+
+    return query
+
+
 @app.route('/ai/v3/sparql', methods=['POST'])
 def generate_sparql_query():
     json_content = request.json
     query = json_content.get("query")
+    model_name = json_content.get("model")
+    generation_type = json_content.get("type")
     response_data = {
         "query_response": ""
     }
     sources.clear()
 
-    prompt = (
-        f"For a given query, create a sparql interrogation based on the following examples. "
-        f"It's mandatory to assign ?abstract, ?thumbnail, ?image_list and ?url as in the examples. "
+    simple_prompt = (
+        f"For a given query, write a sparql interrogation that will extract the abstracts related to it that might "
+        f"answer it. "
+        f"It is mandatory to have the following lines of code in what you generate:\n"
+        f"'SELECT DISTINCT ?abstract ?thumbnail (GROUP_CONCAT(?images; separator=', ') AS ?image_list) ?url WHERE {{', "
+        f"'dbo:abstract ?abstract ;', "
+        f"'dbo:thumbnail ?thumbnail ;', "
+        f"'foaf:depiction ?images ;', "
+        f"'foaf:isPrimaryTopicOf ?url .' and "
+        f"'FILTER (lang(?abstract) = 'en')'. "
+        f"Return just the Sparql interrogation. "
+        f"The query is: '{query}'."
+    )
+    prompt_with_examples = (
+        f"For a given query, write a sparql interrogation based on the following examples. "
         f"Example 1:\n"
         f"'What is the tallest mountain in Europe?'\n"
         f"SELECT DISTINCT ?abstract ?thumbnail (GROUP_CONCAT(?images; separator=', ') AS ?image_list) ?url WHERE {{\n"
@@ -719,29 +799,25 @@ def generate_sparql_query():
         f"      FILTER (CONTAINS(?abstract, 'Python') = true)\n"
         f"      FILTER (lang(?abstract) = 'en')\n"
         f"}}\n"
+        f"It's mandatory to assign ?abstract, ?thumbnail, ?image_list and ?url as in the examples. "
+        f"Return just the Sparql interrogation. "
         f"The query is: '{query}'."
     )
 
-    sparql_query = llm.with_config(configurable={"llm_temperature": 0.0}).invoke(prompt)
-    # prompt_conf = PromptTemplate.from_template(prompt)
-    # generative_llm = TextGen(model_url="http://localhost:5000")
-    # llm_chain = LLMChain(prompt=prompt_conf, llm=generative_llm)
-    # sparql_query = llm_chain.run(query)
-    # print(sparql_query)
+    valid = False
+    sparql_query = ""
+    while not valid:
+        if generation_type == "with-examples":
+            sparql_query = get_text_based_on_model(model_name, prompt_with_examples, 0.0)
+        if generation_type == "without-examples":
+            sparql_query = get_text_based_on_model(model_name, simple_prompt, 0.0)
+        print("------------------------------------")
+        print(sparql_query)
+        valid = verify_generated_interrogation(sparql_query)
+
+    sparql_query = clean_sparql_query(sparql_query)
     response_data["query_response"] = sparql_query
     return jsonify(response_data)
-
-
-def clean_sparql_query(query):
-    query = query.strip()
-    while not query.lower().startswith("select"):
-        query = query[1:].strip()
-
-    # Ensure the query ends with "}" or a number (for "LIMIT number")
-    while not (query.endswith("}") or re.search(r"\d+$", query)):
-        query = query[:-1].strip()
-
-    return query
 
 
 @app.route('/ai/v3/dbpedia', methods=['POST'])
@@ -754,10 +830,8 @@ def search_with_generated_query():
         "status": 0
     }
 
-    sparql_query = clean_sparql_query(sparql_query)
     print(sparql_query)
     sparql.setQuery(sparql_query)
-
     try:
         results = sparql.query().convert()
         if results["results"]["bindings"]:
@@ -807,7 +881,7 @@ def search_with_generated_query():
             if dbpedia_response:
                 combined_response = dbpedia_response
             else:
-                apology = llm.invoke(apology_prompt)
+                apology = gemini_model.generate_content(apology_prompt).text
                 response_data["query_response"] = apology if apology else "An error occurred while apologizing."
                 response_data["status"] = 500
                 return jsonify(response_data)
