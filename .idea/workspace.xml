@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="145b4c81-cc7d-4a68-b6ec-96da78af39fe" name="Changes" comment="Implemented image search for an obtained answer" />
+    <list default="true" id="145b4c81-cc7d-4a68-b6ec-96da78af39fe" name="Changes" comment="Sending images that were considered, but not selected, to Frontend" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -31,7 +31,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="change-model" />
+        <entry key="$PROJECT_DIR$" value="main" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -66,7 +66,7 @@
     "Flask server.Flask (app.py).executor": "Run",
     "Python.app.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
-    "git-widget-placeholder": "5fab2d03",
+    "git-widget-placeholder": "display-search-process",
     "last_opened_file_path": "D:/Universitate/Licenta/ChatBot/ChatBot-Backend",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
@@ -149,18 +149,17 @@
       <method v="2" />
     </configuration>
     <list>
+      <item itemvalue="Docker.docker-compose.yml: Compose Deployment" />
       <item itemvalue="Docker.docker-compose.yml.multi2vec-clip: Compose Deployment" />
       <item itemvalue="Docker.docker-compose.yml.weaviate: Compose Deployment" />
-      <item itemvalue="Docker.docker-compose.yml: Compose Deployment" />
       <item itemvalue="Python.app" />
     </list>
     <recent_temporary>
       <list>
         <item itemvalue="Python.app" />
-        <item itemvalue="Docker.docker-compose.yml: Compose Deployment" />
         <item itemvalue="Docker.docker-compose.yml.weaviate: Compose Deployment" />
         <item itemvalue="Docker.docker-compose.yml.multi2vec-clip: Compose Deployment" />
-        <item itemvalue="Python.app" />
+        <item itemvalue="Docker.docker-compose.yml: Compose Deployment" />
       </list>
     </recent_temporary>
   </component>
@@ -237,6 +236,12 @@
       <workItem from="1719732432737" duration="31553000" />
       <workItem from="1719820891953" duration="6424000" />
       <workItem from="1719834439939" duration="18286000" />
+      <workItem from="1719861591621" duration="839000" />
+      <workItem from="1719862450001" duration="68000" />
+      <workItem from="1719903219970" duration="3238000" />
+      <workItem from="1719931471625" duration="40000" />
+      <workItem from="1719931521964" duration="10880000" />
+      <workItem from="1720077967117" duration="4657000" />
     </task>
     <task id="LOCAL-00001" summary="Initial Commit">
       <option name="closed" value="true" />
@@ -310,7 +315,15 @@
       <option name="project" value="LOCAL" />
       <updated>1719696003368</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="Sending images that were considered, but not selected, to Frontend">
+      <option name="closed" value="true" />
+      <created>1720084171073</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1720084171073</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -338,11 +351,12 @@
     <MESSAGE value="Implemented v3 using a generated sparql interrogation" />
     <MESSAGE value="Implemented retry mechanism for search v2" />
     <MESSAGE value="Implemented image search for an obtained answer" />
-    <option name="LAST_COMMIT_MESSAGE" value="Implemented image search for an obtained answer" />
+    <MESSAGE value="Sending images that were considered, but not selected, to Frontend" />
+    <option name="LAST_COMMIT_MESSAGE" value="Sending images that were considered, but not selected, to Frontend" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/ChatBot_Backend$Flask__app_py_.coverage" NAME="Flask (app.py) Coverage Results" MODIFIED="1719321380794" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/ChatBot_Backend$app.coverage" NAME="app Coverage Results" MODIFIED="1719857370797" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/ChatBot_Backend$app.coverage" NAME="app Coverage Results" MODIFIED="1720083123952" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/ChatBot_Backend$ChatBot_Backend.coverage" NAME="ChatBot-Backend Coverage Results" MODIFIED="1716556975550" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>

@@ -25,7 +25,7 @@ CORS(app)
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-PALM_API_KEY = "ya29.a0AXooCgtSfB1vjugt4vB6110ztf0BLWPqvdzvXdxGHXFf4g6PVq4fTascyB3xByHOMt5EkJPnvDnDTOmwyL2UavfuA_-h59GVLdhol6j7fD0mZOFbn_LGmnRXUFwUIrNUjPp6f_mMV77TYnjaT_PZOEa_-SLDNtTAmoli5ro19_lWeNGu5nOqvUff9d1EYUXcwv3eKJfIKPImmddnTeErVTKXgyTjkOVaw3oNrEO7pd0hC2qn4ABemBgh7wsoTB62OP0VqA7qxgfAxcctWHY3_djm2lSnY9cnIeKNRr70OJRbMuXOpOWTyrG-NWAXUWq_TrQwDaeMb9zeS0CU7UKUhsnZ1_s4ZJFKBuDfjmcDuzPFr3SkJ9HTLy4uFKazwDjNf-IsPXdheeQQ8yAPsPnHzXbnTXO9T0GgiFoaCgYKAYcSARMSFQHGX2MiTGLld-wWM5M1xFAfhgVIzg0426"
+PALM_API_KEY = "ya29.a0AXooCgtlriwaWKCddMTHiFg7sDg6iyWVJbgol5H-FhLepyoQsAkU78jnQuTBcRc4flxaH8HzzGk52Ph8k9nlhvApDcQZDHpo1XmgEpO1b9trIxV8SdErSIqeHSbep212RJN058uwIDLKfiETHrWbefXUHQxFDEs5KW9Y-0yA3u3LD36l0fttUCYDObM2w2I7L3P3g8pOedLYMH4ZwyBgL-XOLkXjumc0i1tQpanIu7AQYA9L0o2NXo3p1WEjWAtPKw52D-TUNTYBw6sOVqmSTR-SZKsJFHVHFJfHbbdfuhmDAaqzb2MRNoXKozsozIn_xxJtWibTsOGQCqQ2JKfWU1C6HsDuDLrotyei4Sw9EJ-tsRmxQsj_Hy08FmfhDRn0MCg78w9VH0zpg7eANOw5-geB55n_hYgiAwaCgYKAasSARMSFQHGX2Mit1KbbPJxYWtoLtohW7eoOA0425"
 
 vertexai.init(project="t-monument-297120", location="us-central1")
 chat_model = ChatModel.from_pretrained("chat-bison-32k@002")
@@ -98,11 +98,11 @@ client.collections.create(
         Configure.NamedVectors.multi2vec_clip(
             name="image",
             image_fields=[
-                Multi2VecField(name="image_data", weight=0.4)
+                Multi2VecField(name="image_data", weight=0.5)
             ],
             text_fields=[
-                Multi2VecField(name="name", weight=0.1),
-                Multi2VecField(name="source", weight=0.5)
+                Multi2VecField(name="name", weight=0.2),
+                Multi2VecField(name="source", weight=0.3)
             ]
         )
     ]
@@ -127,7 +127,7 @@ client.collections.create(
     ),
     generative_config=Configure.Generative.palm(
         project_id="t-monument-297120",
-        model_id="gemini-1.0-pro-002",
+        model_id="gemini-1.0-pro",
         temperature=0.25
     )
 )
@@ -252,6 +252,7 @@ def add_images_to_weaviate(objects):
 
 def fetch_and_encode_and_add(image_url, source, current_batch):
     encoded_image = fetch_and_encode_image(image_url)
+    image_url = image_url.replace("http://commons.wikimedia.org/wiki/Special:FilePath/", "")
     if encoded_image:
         image_object = {
             "image_data": encoded_image,
@@ -381,13 +382,22 @@ def get_sources():
     return jsonify(sources)
 
 
+current_images = []
+
+
+@app.route('/ai/considered_images', methods=['GET'])
+def get_considered_images():
+    return jsonify(current_images)
+
+
 @app.route('/ai/image', methods=["GET"])
 def search_image():
     retrieved_response = request.args.get('query')
     model_name = request.args.get('model')
+    current_images.clear()
     prompt = (
         f"From the generated answer, extract the main subject/one of the subjects (if there are more than one) and "
-        f"return it. If there is no subject or the answer is an apology, return 'No'. "
+        f"return just it. If there is no subject or the answer is an apology, return 'No'. "
         f"The generated answer is: '{retrieved_response}'."
     )
     subject_for_image = get_text_based_on_model(model_name, prompt, 1.0)
@@ -396,22 +406,39 @@ def search_image():
     subject_for_image = ' '.join(word.capitalize() for word in words)
     print("Subject for image: " + subject_for_image)
     if subject_for_image != "No":
-        response = images.query.near_text(
+        queried_images = images.query.near_text(
             query=subject_for_image,
             limit=5,
             return_properties=["image_data", "name"],
             return_metadata=MetadataQuery(distance=True)
         )
         i = 1
-        for o in response.objects:
+        for o in queried_images.objects:
             f = open("file" + str(i) + ".txt", "w")
             f.write(o.properties['image_data'])
             f.close()
             print(o.properties['name'] + " " + str(o.metadata.distance))
             i = i + 1
         image_response = {
-            "image": response.objects[0].properties['image_data']
+            "image": queried_images.objects[0].properties['image_data'],
+            "distance": queried_images.objects[0].metadata.distance
         }
+        current_images.append({
+            "image": queried_images.objects[1].properties['image_data'],
+            "distance": queried_images.objects[1].metadata.distance
+        })
+        current_images.append({
+            "image": queried_images.objects[2].properties['image_data'],
+            "distance": queried_images.objects[2].metadata.distance
+        })
+        current_images.append({
+            "image": queried_images.objects[3].properties['image_data'],
+            "distance": queried_images.objects[3].metadata.distance
+        })
+        current_images.append({
+            "image": queried_images.objects[4].properties['image_data'],
+            "distance": queried_images.objects[4].metadata.distance
+        })
         return jsonify(image_response)
     return None
 
@@ -420,6 +447,7 @@ def construct_search_task_string(query):
     search_task = (
         f"For the given query, use these obtained abstracts and try to answer to the query only if the words from "
         f"them provide the answer. If you can do it, return the answer. If not, just return ''. "
+        f"Do not make the answer too long. "
         f"The query is: '{query}'."
     )
     return search_task
@@ -518,7 +546,7 @@ def search_version_1():
         print(total.total_count)
         res = dbpedia.query.near_text(
             query=query,
-            limit=15
+            limit=10
         )
         if res.objects:
             response = dbpedia.generate.near_text(
@@ -586,7 +614,7 @@ def search_version_2():
             f"2. Add 3 associated subjects that are relevant to the query, each suitable for Wikipedia search.\n"
             f"3. Extract all nouns from the query.\n"
             f"4. Add 3 associated nouns that are relevant to the query.\n"
-            f"Take 15 subjects and nouns in total and output them in a comma-separated format, with no additional "
+            f"Take 10 subjects and nouns in total and output them in a comma-separated format, with no additional "
             f"text, bullet points, or special characters.\n"
             f"The query is: '{query}'."
         )
@@ -684,7 +712,7 @@ def search_version_2():
 
     res = dbpedia.query.near_text(
         query=query,
-        limit=15
+        limit=10
     )
     dbpedia_response = ""
     if res.objects:
