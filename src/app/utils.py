@@ -10,7 +10,7 @@ from vertexai.language_models import ChatModel, TextGenerationModel
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-PALM_API_KEY = "ya29.a0AXooCgs_-6tQqesQ1xdcv7OwE43hhC7UVug5EHOD-cO_shuwunoobN-zsfK-RRgJwRp3D-vFwf-6mvp9tF9hQSVnkUWMUXcA3GlXwZbOsKpwxfYEb7EylLBtXSQtErVIwlsMFZ3BnJcSKq6ss8T8XEvvfGd8zbN1feTIOcek4wg3ZfJrH64d6ovP_18-JVrVfq-IcE1PIhWilkj9tfYehdaYY80bhnZWW_PUdlS_5feeLuXqVOar9hD61aM8ett3rCFCXSneXvfvOEhhShKCmOE7HpGzpLNwEmcBERWRfLsFgnu12otCkh5y9j689ofGnBxiX6C1zQnEC3DSJ2OyjC1QgCWrc4vlbsF66maZERvMzCHUQF3f3O1FssPFxGyJXcjeQj3RoYpxhByTxnbnVCF468bEzpvwo_IaCgYKAS8SARMSFQHGX2MivYo1htFM9Fi8VbjESsVf8g0426"
+PALM_API_KEY = "ya29.a0AXooCgvphl8EhiogRY6UlsxwSU4-X_H0PbSl8d1LVkRaa8IebBdOYw34olXJfZmf20Yk1u9KUyp6OwN-wkUaF6cjAnN1-sUL8mH4h9vENcbjyBZ9ZooNx1uorcpXnYKfcLaoedykUyuYhVPLFiJme2XnJIWR7F8C8uM-EZOLoXH9xHEoEybTWpslC16iiVnltytjND31X13RiFZeyYapq9GOhBZc_TvLwuYjR7RYD-Te946ys9VSQ3hUQhPX76a6BIIej_4SfJp0U_m_L46wCQDkgYkQPkQedx5G7DcQFyIeWo-PBEDA9jXJEMJpsn3jAIp1eiWaPdewjlNkGIC_x_ERcpEC23XXZFfCksayRsUBxL-EheaqBa5TGuDhFwjoaz7rsKVfU0iLKQ3U5TRmRtTcuR2pXARgMb8aCgYKAfASARMSFQHGX2MiWnGS0Jb96beyYZ3iIjCOSA0426"
 
 vertexai.init(project="t-monument-297120", location="us-central1")
 chat_model = ChatModel.from_pretrained("chat-bison-32k@002")
@@ -88,9 +88,8 @@ def get_text_based_on_model(model_name, prompt, temperature=0.0):
 
 def construct_search_task_string(query):
     search_task = (
-        f"For the given query, use these obtained abstracts and try to answer to the query only if the words from "
-        f"them provide the answer. If you can do it, return the answer. If not, just return ''. "
-        f"Make the generated answer have at most 3 sentences. "
+        f"For the given query, use these obtained abstracts and try to answer in 3 sentences to the query only if the "
+        f"words from them provide the answer. If you can do it, return the answer. If not, just return ''. "
         f"The query is: '{query}'."
     )
     return search_task

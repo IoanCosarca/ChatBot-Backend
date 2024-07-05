@@ -5,9 +5,10 @@ from flask import Blueprint, request, jsonify
 from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
 
-from app import dbpedia
-from app.images import add_images_to_weaviate
-from app.utils import sources, get_text_based_on_model, sparql, client, obtained_abstracts, \
+from src.app import dbpedia
+from src.app.images import add_images_to_weaviate
+from src.app.socket_handler import socketio
+from src.app.utils import sources, get_text_based_on_model, sparql, client, obtained_abstracts, \
     construct_search_task_string, gemini_model, apology_prompt
 
 search_version3_bp = Blueprint('search_version3', __name__)
@@ -126,7 +127,6 @@ def search_with_generated_query():
         "status": 0
     }
 
-    print(sparql_query)
     sparql.setQuery(sparql_query)
     try:
         results = sparql.query().convert()
@@ -137,6 +137,7 @@ def search_with_generated_query():
                     if abstract not in obtained_abstracts:
                         obtained_abstracts.append(abstract)
                         url = result["url"]["value"]
+                        socketio.emit('search_stage', {'searchStage': "Found page: " + url})
                         thumbnail = result["thumbnail"]["value"]
                         image_list = result["image_list"]["value"]
                         article_object = {
@@ -150,12 +151,13 @@ def search_with_generated_query():
                             properties=article_object,
                             uuid=generate_uuid5(result["url"]["value"])
                         )
-            total = dbpedia.aggregate.over_all(total_count=True)
-            print(total.total_count)
+            total = dbpedia.aggregate.over_all(total_count=True).total_count
+            socketio.emit('article_count_update', {'articleCount': total})
 
             res = dbpedia.query.near_text(
                 query=query,
-                limit=10
+                distance=0.4,
+                limit=15
             )
             dbpedia_response = ""
             if res.objects:

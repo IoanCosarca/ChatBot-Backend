@@ -2,12 +2,12 @@ from flask import Flask
 from flask_cors import CORS
 from weaviate.util import generate_uuid5
 
-from app.images import images_bp
-from app.resources import df, dbpedia, resources_bp
-from app.search_version1 import search_version1_bp
-from app.search_version2 import search_version2_bp
-from app.search_version3 import search_version3_bp
-from app.utils import client, sparql, obtained_abstracts
+from src.app.images import images_bp
+from src.app.resources import df, dbpedia, resources_bp
+from src.app.search_version1 import search_version1_bp
+from src.app.search_version2 import search_version2_bp
+from src.app.search_version3 import search_version3_bp
+from src.app.utils import client, sparql, obtained_abstracts
 
 
 def create_app():
@@ -76,8 +76,5 @@ def create_app():
                 print(f"No abstract found for initial sparql query.")
     except Exception as exception:
         print(f"An error occurred while querying DBpedia: {exception}")
-
-    no_articles = dbpedia.aggregate.over_all(total_count=True)
-    print(no_articles.total_count)
 
     return app

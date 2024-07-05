@@ -5,9 +5,10 @@ from retrying import retry
 from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
 
-from app.images import add_images_to_weaviate
-from app.resources import jeopardy, dbpedia
-from app.utils import text_model, create_subject_variants, sources, construct_search_task_string, \
+from src.app.images import add_images_to_weaviate
+from src.app.resources import jeopardy, dbpedia
+from src.app.socket_handler import socketio
+from src.app.utils import text_model, create_subject_variants, sources, construct_search_task_string, \
     get_text_based_on_model, apology_prompt, client, sparql, obtained_abstracts, clean_word
 
 search_version1_bp = Blueprint('search_version1', __name__)
@@ -16,7 +17,7 @@ search_version1_bp = Blueprint('search_version1', __name__)
 def search_on_dbpedia_n_add_to_weaviate(subject_variants):
     with client.batch.fixed_size(batch_size=100) as batch_search_1:
         for variant in subject_variants:
-            print(variant)
+            socketio.emit('search_stage', {'searchStage': "Searching variant: " + variant})
             sparql_query = f"""
                 SELECT DISTINCT ?abstract ?thumbnail (GROUP_CONCAT(?images; separator=", ") AS ?image_list) ?url WHERE {{
                     ?entity rdfs:label "{variant}"@en ;
@@ -63,7 +64,7 @@ def initial_dbpedia_search(query):
             f"the query, each suitable for Wikipedia search. "
             f"The query is: '{query}'."
         )
-        initial_subjects = text_model.predict(prompt, temperature=0.0, max_output_tokens=1024).text
+        initial_subjects = text_model.predict(prompt, temperature=1.0, max_output_tokens=1024).text
         if not initial_subjects:
             raise ValueError("Empty response from LLM for subjects")
         for list_subjects in initial_subjects.split("\n"):
@@ -88,7 +89,7 @@ def additional_dbpedia_search(query):
             f"associated subjects to the query, each suitable for Wikipedia search. "
             f"The query is: '{query}'."
         )
-        associated_subjects = text_model.predict(prompt, temperature=0.0, max_output_tokens=1024).text
+        associated_subjects = text_model.predict(prompt, temperature=1.0, max_output_tokens=1024).text
         for list_subjects in associated_subjects.split("\n"):
             for s in list_subjects.split(", "):
                 subjects.add(clean_word(s))
@@ -153,11 +154,12 @@ def search_version_1():
     initial_dbpedia_search(query)
 
     print("========== Results from Initial DBpedia Query ==========")
-    total = dbpedia.aggregate.over_all(total_count=True)
-    print(total.total_count)
+    total = dbpedia.aggregate.over_all(total_count=True).total_count
+    socketio.emit('article_count_update', {'articleCount': total})
     res = dbpedia.query.near_text(
         query=query,
-        limit=10
+        distance=0.4,
+        limit=15
     )
     first_response = ""
     aux_sources = []
@@ -177,7 +179,7 @@ def search_version_1():
         add_images_to_weaviate(response.objects)
 
     prompt = (
-        f"Is the answer to {query} in {first_response}? Respond just with 'Yes' or 'No'."
+        f"Is the answer to {query} in {first_response}? Respond either with 'Yes' or 'No', just the word."
     )
     request_satisfied = get_text_based_on_model(model_name, prompt, 1.0)
     request_satisfied = clean_word(request_satisfied)
@@ -192,11 +194,12 @@ def search_version_1():
         additional_dbpedia_search(query)
 
         print("========== Results from Additional DBpedia Query ==========")
-        total = dbpedia.aggregate.over_all(total_count=True)
-        print(total.total_count)
+        total = dbpedia.aggregate.over_all(total_count=True).total_count
+        socketio.emit('article_count_update', {'articleCount': total})
         res = dbpedia.query.near_text(
             query=query,
-            limit=10
+            distance=0.4,
+            limit=15
         )
         if res.objects:
             response = dbpedia.generate.near_text(

@@ -8,7 +8,8 @@ from weaviate.collections.classes.config_vectorizers import Multi2VecField
 from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
 
-from app.utils import obtained_images, get_text_based_on_model, current_images, client
+from src.app.socket_handler import socketio
+from src.app.utils import obtained_images, get_text_based_on_model, current_images, client
 
 images_bp = Blueprint('images', __name__)
 
@@ -74,6 +75,7 @@ def add_images_to_weaviate(objects):
 def fetch_and_encode_and_add(image_url, source, current_batch):
     encoded_image = fetch_and_encode_image(image_url)
     image_url = image_url.replace("http://commons.wikimedia.org/wiki/Special:FilePath/", "")
+    socketio.emit('search_stage', {'searchStage': "Add encoded image to Weaviate: " + image_url})
     if encoded_image:
         image_object = {
             "image_data": encoded_image,

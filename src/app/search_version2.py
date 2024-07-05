@@ -5,9 +5,10 @@ from retrying import retry
 from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
 
-from app import dbpedia
-from app.images import add_images_to_weaviate
-from app.utils import sources, text_model, create_subject_variants, client, sparql, obtained_abstracts, \
+from src.app import dbpedia
+from src.app.images import add_images_to_weaviate
+from src.app.socket_handler import socketio
+from src.app.utils import sources, text_model, create_subject_variants, client, sparql, obtained_abstracts, \
     construct_search_task_string, get_text_based_on_model, apology_prompt, clean_word
 
 search_version2_bp = Blueprint('search_version2', __name__)
@@ -29,14 +30,15 @@ def search_version_2():
     subjects = set()
     try:
         prompt = (
-            f"For the given query, construct a comma-separated list of at most 15 entries, containing:\n"
+            f"For the given query, construct a comma-separated list of at most 15 entries, with no bullet points, "
+            f"containing:\n"
             f"All the subjects from the query, each suitable for Wikipedia search.\n"
-            f"3 associated subjects that are relevant to the query, each suitable for Wikipedia search.\n"
+            f"3 associated subjects, each suitable for Wikipedia search (mandatory).\n"
             f"All nouns from the query.\n"
-            f"3 associated nouns that are relevant to the query.\n"
+            f"3 associated nouns (mandatory).\n"
             f"The query is: '{query}'."
         )
-        extracted_subjects = text_model.predict(prompt, temperature=0.0, max_output_tokens=1024).text
+        extracted_subjects = text_model.predict(prompt, temperature=1.0, max_output_tokens=1024).text
         if not extracted_subjects:
             raise ValueError("Empty response from LLM for subjects")
         for s in extracted_subjects.split(", "):
@@ -50,7 +52,7 @@ def search_version_2():
 
     with client.batch.fixed_size(batch_size=100) as batch_search_2:
         for variant in subject_variants:
-            print(variant)
+            socketio.emit('search_stage', {'searchStage': "Searching variant: " + variant})
             sparql_query_1 = f"""
                 SELECT DISTINCT ?abstract ?thumbnail (GROUP_CONCAT(?images; separator=", ") AS ?image_list) ?url WHERE {{
                     ?entity rdfs:label "{variant}"@en ;
@@ -89,7 +91,7 @@ def search_version_2():
         for variant in variants_with_underscores:
             for term in subject_variants:
                 if variant.lower() != term.lower():
-                    print(variant + " " + str(term))
+                    socketio.emit('search_stage', {'searchStage': "Searching variant: " + variant + ", containing: " + term})
                     sparql_query_2 = f"""
                         SELECT DISTINCT ?abstract ?thumbnail (GROUP_CONCAT(?images; separator=", ") AS ?image_list) ?url WHERE {{
                             ?entity rdf:type dbo:{variant} ;
@@ -125,12 +127,13 @@ def search_version_2():
                     except Exception as e:
                         print(f"An error occurred while querying variant '{variant}': {e}")
 
-    total = dbpedia.aggregate.over_all(total_count=True)
-    print(total.total_count)
+    total = dbpedia.aggregate.over_all(total_count=True).total_count
+    socketio.emit('article_count_update', {'articleCount': total})
 
     res = dbpedia.query.near_text(
         query=query,
-        limit=10
+        distance=0.4,
+        limit=15
     )
     dbpedia_response = ""
     if res.objects:

@@ -2,7 +2,7 @@ import pandas as pd
 from flask import Blueprint, jsonify
 from weaviate.collections.classes.config import Configure, VectorDistances, Property, DataType
 
-from app.utils import sources, client
+from src.app.utils import sources, client
 
 resources_bp = Blueprint('resources', __name__)
 
