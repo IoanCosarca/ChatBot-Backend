@@ -231,7 +231,7 @@ def search_version_1():
             f"The jeopardy response is: '{jeopardy_response}'. "
             f"The dbpedia response is: '{dbpedia_response}'."
         )
-        combined_response = get_text_based_on_model(model_name, prompt, 0.0)
+        combined_response = get_text_based_on_model(model_name, prompt, 1.0)
     elif jeopardy_response:
         combined_response = jeopardy_response
     elif dbpedia_response:

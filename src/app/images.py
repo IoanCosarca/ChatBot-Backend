@@ -9,7 +9,7 @@ from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
 
 from src.app.socket_handler import socketio
-from src.app.utils import obtained_images, get_text_based_on_model, current_images, client
+from src.app.utils import obtained_images, get_text_based_on_model, current_images, client, text_model, sources
 
 images_bp = Blueprint('images', __name__)
 
@@ -75,7 +75,7 @@ def add_images_to_weaviate(objects):
 def fetch_and_encode_and_add(image_url, source, current_batch):
     encoded_image = fetch_and_encode_image(image_url)
     image_url = image_url.replace("http://commons.wikimedia.org/wiki/Special:FilePath/", "")
-    socketio.emit('search_stage', {'searchStage': "Add encoded image to Weaviate: " + image_url})
+    socketio.emit('search_stage', {'searchStage': "Adding encoded image to Weaviate: " + image_url})
     if encoded_image:
         image_object = {
             "image_data": encoded_image,
@@ -116,7 +116,7 @@ def search_image():
         queried_images = images.query.near_text(
             query=subject_for_image,
             limit=5,
-            return_properties=["image_data", "name"],
+            return_properties=["image_data", "name", "source"],
             return_metadata=MetadataQuery(distance=True)
         )
         i = 1
@@ -143,3 +143,54 @@ def search_image():
 @images_bp.route('/ai/considered_images', methods=['GET'])
 def get_considered_images():
     return jsonify(current_images)
+
+
+@images_bp.route('/ai/v4', methods=['POST'])
+def get_image_description():
+    print("---------- Search Version 4 ----------")
+    json_content = request.json
+    image = json_content.get("image")
+    query = json_content.get("query")
+    model_name = json_content.get("model")
+    response_data = {
+        "query_response": "",
+        "status": 0
+    }
+    sources.clear()
+    current_images.clear()
+
+    response = images.query.near_image(
+        near_image=image,
+        distance=0.25,
+        limit=1,
+        return_properties=["image_data", "name"],
+        return_metadata=MetadataQuery(distance=True)
+    )
+    if response.objects:
+        assign_considered_images(response.objects[0])
+        image_name = response.objects[0].properties['name']
+        socketio.emit('search_stage', {'searchStage': "Found similar image: " + image_name})
+        print("http://commons.wikimedia.org/wiki/Special:FilePath/" + image_name)
+
+        prompt1 = (
+            f"From the provided image name, extract a subject and return just the word(s) you would search on "
+            f"Wikipedia to get it, no other text. Limit on the basics, do not use colors or specifications. "
+            f"The image name is: {image_name}."
+        )
+        subject = text_model.predict(prompt1, temperature=1.0, max_output_tokens=1024).text
+
+        prompt2 = (
+            f"For the obtained subject, make a sentence in which you answer to the given query, using the subject. "
+            f"Limit your words just to the words of the provided subject. "
+            f"The subject is: {subject}. "
+            f"The query is: {query}."
+        )
+        answer = get_text_based_on_model(model_name, prompt2, 1.0)
+
+        response_data["query_response"] = answer
+        response_data["status"] = 200
+        return jsonify(response_data)
+
+    response_data["query_response"] = "No similar image found."
+    response_data["status"] = 500
+    return jsonify(response_data)
