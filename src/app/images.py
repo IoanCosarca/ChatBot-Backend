@@ -1,5 +1,6 @@
 import base64
-from concurrent.futures import ThreadPoolExecutor
+import concurrent.futures
+import re
 
 import requests
 from flask import Blueprint, request, jsonify
@@ -51,42 +52,40 @@ def fetch_and_encode_image(image_url):
         return None
 
 
-def add_images_to_weaviate(objects):
+def clean_width_param(image_name):
+    pattern = r'\?width=\d+$'
+    return re.sub(pattern, '', image_name)
+
+
+def process_image(image):
+    image_name = clean_width_param(image["name"])
+    if image_name not in obtained_images:
+        encoded_image = fetch_and_encode_image(image_name)
+        if encoded_image:
+            image_url = image_name.replace("http://commons.wikimedia.org/wiki/Special:FilePath/", "")
+            socketio.emit('search_stage', {'searchStage': "Adding encoded image to Weaviate: " + image_url})
+            image_object = {
+                "image_data": encoded_image,
+                "name": image_url,
+                "source": image["source"]
+            }
+            obtained_images.append(image_name)
+            return image_object
+    return None
+
+
+def add_images_to_weaviate(image_list):
     with client.batch.fixed_size(batch_size=100) as current_batch:
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = []
-            for obj in objects:
-                source = obj.properties["url"]
-                thumbnail_url = obj.properties["thumbnail"]
-                if thumbnail_url not in obtained_images:
-                    obtained_images.append(thumbnail_url)
-                    futures.append(executor.submit(fetch_and_encode_and_add, thumbnail_url, source, current_batch))
-
-                image_list = obj.properties["image_list"]
-                for image_url in image_list.split(", "):
-                    if image_url not in obtained_images:
-                        obtained_images.append(image_url)
-                        futures.append(executor.submit(fetch_and_encode_and_add, image_url, source, current_batch))
-
-            for future in futures:
-                future.result()
-
-
-def fetch_and_encode_and_add(image_url, source, current_batch):
-    encoded_image = fetch_and_encode_image(image_url)
-    image_url = image_url.replace("http://commons.wikimedia.org/wiki/Special:FilePath/", "")
-    socketio.emit('search_stage', {'searchStage': "Adding encoded image to Weaviate: " + image_url})
-    if encoded_image:
-        image_object = {
-            "image_data": encoded_image,
-            "name": image_url,
-            "source": source
-        }
-        current_batch.add_object(
-            collection="Images",
-            properties=image_object,
-            uuid=generate_uuid5(image_object)
-        )
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [executor.submit(process_image, image) for image in image_list]
+            for future in concurrent.futures.as_completed(futures):
+                image_object = future.result()
+                if image_object:
+                    current_batch.add_object(
+                        collection="Images",
+                        properties=image_object,
+                        uuid=generate_uuid5(image_object)
+                    )
 
 
 def assign_considered_images(image_object):
