@@ -156,9 +156,10 @@ def search_with_generated_query():
 
             res = dbpedia.query.near_text(
                 query=query,
-                distance=0.4,
-                limit=15
+                distance=0.37,
+                limit=10
             )
+            result_images = []
             dbpedia_response = ""
             if res.objects:
                 response = dbpedia.generate.near_text(
@@ -173,7 +174,16 @@ def search_with_generated_query():
                     pprint(o.properties)
                     print(o.metadata.distance)
                     sources.append(o.properties["abstract"])
-                add_images_to_weaviate(response.objects)
+                    result_images.append({
+                        "name": o.properties["thumbnail"],
+                        "source": o.properties["url"]
+                    })
+                    for image_url in o.properties["image_list"].split(", "):
+                        result_images.append({
+                            "name": image_url,
+                            "source": o.properties["url"]
+                        })
+                add_images_to_weaviate(result_images)
 
             print("DBpedia response: " + dbpedia_response)
             if dbpedia_response:

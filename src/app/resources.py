@@ -23,13 +23,14 @@ client.collections.create(
         Property(name="answer", data_type=DataType.TEXT)
     ],
     vectorizer_config=Configure.Vectorizer.text2vec_palm(
-        model_id="textembedding-gecko@001",
-        vectorize_collection_name=False,
-        project_id="t-monument-297120"
+        project_id="t-monument-297120",
+        model_id="textembedding-gecko-multilingual@001",
+        vectorize_collection_name=False
     ),
     generative_config=Configure.Generative.palm(
-        temperature=0.25,
-        project_id="t-monument-297120"
+        project_id="t-monument-297120",
+        model_id="gemini-1.0-pro",
+        temperature=1.0
     ),
 )
 jeopardy = client.collections.get("JeopardyQuestion")
@@ -41,20 +42,20 @@ client.collections.create(
         distance_metric=VectorDistances.COSINE
     ),
     properties=[
-        Property(name="abstract", data_type=DataType.TEXT),  # dbo:abstract
+        Property(name="abstract", data_type=DataType.TEXT),
         Property(name="url", data_type=DataType.TEXT),
         Property(name="thumbnail", data_type=DataType.TEXT),
         Property(name="image_list", data_type=DataType.TEXT)
     ],
     vectorizer_config=Configure.Vectorizer.text2vec_palm(
         project_id="t-monument-297120",
-        model_id="text-multilingual-embedding-002",
+        model_id="textembedding-gecko-multilingual@001",
         vectorize_collection_name=False
     ),
     generative_config=Configure.Generative.palm(
         project_id="t-monument-297120",
         model_id="gemini-1.0-pro",
-        temperature=0.25
+        temperature=1.0
     )
 )
 dbpedia = client.collections.get("DBpediaArticle")
