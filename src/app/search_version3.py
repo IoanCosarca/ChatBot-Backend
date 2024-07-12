@@ -1,6 +1,7 @@
 import re
 from pprint import pprint
 
+import SPARQLWrapper.SPARQLExceptions
 from flask import Blueprint, request, jsonify
 from weaviate.collections.classes.grpc import MetadataQuery
 from weaviate.util import generate_uuid5
@@ -127,9 +128,11 @@ def search_with_generated_query():
         "status": 0
     }
 
+    sparql_query = sparql_query + " LIMIT 500"
     sparql.setQuery(sparql_query)
     try:
         results = sparql.query().convert()
+        socketio.emit('search_stage', {'searchStage': "Beginning search."})
         if results["results"]["bindings"]:
             with client.batch.fixed_size(batch_size=100) as batch_search_3:
                 for result in results["results"]["bindings"]:
@@ -187,7 +190,12 @@ def search_with_generated_query():
 
             print("DBpedia response: " + dbpedia_response)
             if dbpedia_response:
-                combined_response = dbpedia_response
+                prompt = (
+                    f"If the dbpedia response is not an empty string or apology, make sure it has only 3 sentences. If "
+                    f"however it is, apologize for not being able to respond. "
+                    f"The dbpedia response is: '{dbpedia_response}'."
+                )
+                combined_response = gemini_model.generate_content(prompt).text
             else:
                 apology = gemini_model.generate_content(apology_prompt).text
                 response_data["query_response"] = apology if apology else "An error occurred while apologizing."
@@ -203,8 +211,11 @@ def search_with_generated_query():
             return jsonify(response_data)
 
         return jsonify(response_data)
-    except Exception as e:
-        print(e)
+    except SPARQLWrapper.SPARQLExceptions.QueryBadFormed:
+        response_data["query_response"] = "The generated query was not syntactically correct."
+        response_data["status"] = 500
+        return jsonify(response_data)
+    except SPARQLWrapper.SPARQLExceptions.EndPointInternalError:
         response_data["query_response"] = "The generated query was not syntactically correct."
         response_data["status"] = 500
         return jsonify(response_data)

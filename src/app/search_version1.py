@@ -125,7 +125,7 @@ def search_version_1():
     jeopardy_task = (
         f"From the obtained triplets of category-question-answer, if the words from a triplet can answer the query, "
         f"construct a response using just those words. "
-        f"If not, just return ''. "
+        f"If not, just return an empty string ''. "
         f"The query is: '{query}'."
     )
     jeopardy_response = ""
@@ -280,18 +280,28 @@ def search_version_1():
 
     if jeopardy_response and dbpedia_response:
         prompt = (
-            f"Combine in 3 sentences the jeopardy response and dbpedia response to answer the query, if they contain "
-            f"words and are not an apology. If that's not the case, apologize for not being able to respond. "
+            f"Combine in 3 sentences the jeopardy response and dbpedia response to answer the query, if they are not "
+            f"an apology. If that's not the case, apologize for not being able to respond. "
             f"If the query asks for a certain number of items, ensure the response contains only that number. "
             f"The jeopardy response is: '{jeopardy_response}'. "
-            f"The dbpedia response is: '{dbpedia_response}'."
-            f"The query is: '{query}'. "
+            f"The dbpedia response is: '{dbpedia_response}'. "
+            f"The query is: '{query}'."
         )
         combined_response = get_text_based_on_model(model_name, prompt, 1.0)
     elif jeopardy_response:
-        combined_response = jeopardy_response
+        prompt = (
+            f"If the jeopardy response is not an empty string or apology, make sure it has only 3 sentences. If "
+            f"however it is, apologize for not being able to respond. "
+            f"The jeopardy response is: '{jeopardy_response}'."
+        )
+        combined_response = get_text_based_on_model(model_name, prompt, 1.0)
     elif dbpedia_response:
-        combined_response = dbpedia_response
+        prompt = (
+            f"If the dbpedia response is not an empty string or apology, make sure it has only 3 sentences. If however "
+            f"it is, apologize for not being able to respond. "
+            f"The dbpedia response is: '{dbpedia_response}'."
+        )
+        combined_response = get_text_based_on_model(model_name, prompt, 1.0)
     else:
         apology = get_text_based_on_model(model_name, apology_prompt, 0.0)
         response_data["query_response"] = apology if apology else "An error occurred while apologizing."

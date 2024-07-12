@@ -208,7 +208,12 @@ def search_version_2():
 
     print("DBpedia response: " + dbpedia_response)
     if dbpedia_response:
-        combined_response = dbpedia_response
+        prompt = (
+            f"If the dbpedia response is not an empty string or apology, make sure it has only 3 sentences. If however "
+            f"it is, apologize for not being able to respond. "
+            f"The dbpedia response is: '{dbpedia_response}'."
+        )
+        combined_response = get_text_based_on_model(model_name, prompt, 1.0)
     else:
         apology = get_text_based_on_model(model_name, apology_prompt, 0.0)
         response_data["query_response"] = apology if apology else "An error occurred while apologizing."
