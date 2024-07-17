@@ -45,7 +45,14 @@ def fetch_and_encode_image(image_url):
     try:
         response = requests.get(image_url, headers=headers, stream=True)
         response.raise_for_status()
-        image_content = response.content
+
+        image_content = b''
+        for chunk in response.iter_content(chunk_size=8192):
+            image_content += chunk
+            if len(image_content) / (1024 * 1024) > 5:
+                print("Image too large for: " + image_url)
+                return None
+
         encoded_image = base64.b64encode(image_content).decode('utf-8')
         return encoded_image
     except requests.RequestException:
